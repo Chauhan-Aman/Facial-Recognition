@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas and Video Feed</title>
+    <link rel="stylesheet" href="./css/styles.css">
+    <link rel="stylesheet" href="./css/typing.css">
+    <link rel="stylesheet" href="./css/blink.css">
+    <link rel="stylesheet" href="./css/GridScan.css">
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <canvas id="canvasimg"></canvas>
+
+    <h1 style="text-align: center; margin-top: 3rem;" class="z-index-999">FACIAL RECOGNITION</h1>
+
+    <div id="container">
+        <!-- <video id="video-feed" height="540" width="720" autoplay></video> -->
+        <video id="hack-video" height="540" width="720" autoplay loop></video>
+        <img id="video-feed" height="540" width="720" src="./images/trial-images/oldManSerious2.png">
+        <div id="anaylzeResults">
+            <div id="screenshot-container">
+                <img id="screenshot" height="210" width="360" src="" alt="Screenshot will appear here">
+                <div class="scanning-overlay"></div>
+                <div class="scanning-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="typewriter">
+        <h1 class="line1 boxdims">Hey there! Ready for some facial recognition magic?</h1>
+        <h1 class="line2 boxdims">Hmm... Let me get a good look at you!</h1>
+        <h1 class="line3 boxdims">Capturing your beautiful face... Hold tight, say "Cheese!"</h1>
+    </div>
+
+
+    <script src="./scripts/face-api.min.js"></script>
+    <!-- <script src="./scripts/PredictionsScript.js"></script> -->
+    <script src="./scripts/Script.js"></script>
+    <!-- <script src="./scripts/newtyping.js"></script> -->
+    <script src="./scripts/transitions.js"></script>
+    <!-- <script src="./scripts/typingtrials.js"></script> -->
+</body>
+
+</html>

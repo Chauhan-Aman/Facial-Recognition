@@ -1,0 +1,74 @@
+.typewriter h1 {
+    width: fit-content;
+    visibility: hidden;
+    overflow: hidden;
+    /* border-right: .15em solid orange; */
+    white-space: nowrap;
+    letter-spacing: .15em;
+}
+
+.line1 {
+    animation:
+        typing 3.5s steps(40, end),
+        blink-caret .75s step-end infinite,
+        showText 3.5s forwards;
+    animation-delay: 0s;
+}
+
+.line2 {
+    animation:
+        typing 3.5s steps(40, end),
+        blink-caret .75s step-end infinite,
+        showText 3.5s forwards;
+    animation-delay: 3.5s;
+}
+
+.line3 {
+    animation:
+        typing 3.5s steps(40, end),
+        blink-caret .75s step-end infinite,
+        showText 3.5s forwards;
+    animation-delay: 10.5s;
+}
+
+.typinganimation {
+    animation:
+        typing 3.5s steps(40, end),
+        blink-caret .75s step-end infinite,
+        showText 3.5s forwards;
+    animation-delay: 0s;
+}
+
+/* The typing effect */
+@keyframes typing {
+    from {
+        width: 0;
+    }
+
+    to {
+        width: 100%;
+    }
+}
+
+/* The typewriter cursor effect */
+@keyframes blink-caret {
+
+    from,
+    to {
+        border-color: transparent;
+    }
+
+    50% {
+        border-color: orange;
+    }
+}
+
+@keyframes showText {
+    from {
+        visibility: hidden;
+    }
+
+    to {
+        visibility: visible;
+    }
+}
