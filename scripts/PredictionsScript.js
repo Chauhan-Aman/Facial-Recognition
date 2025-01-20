@@ -1,4 +1,4 @@
-console.log(faceapi)
+// console.log(faceapi)
 
 const run = async () => {
     // load our models

@@ -4,7 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas and Video Feed</title>
+    <meta name="description"
+        content="A cutting-edge facial recognition application that analyzes features such as age, gender, and emotions using advanced machine learning models.">
+    <meta name="keywords"
+        content="Facial Recognition, AI, Machine Learning, Age Detection, Gender Prediction, Emotion Analysis, Real-time Scanning">
+    <meta name="author" content="Aman Chauhan">
+    <title>Facial recognition</title>
     <link rel="stylesheet" href="./css/styles.css">
     <link rel="stylesheet" href="./css/typing.css">
     <link rel="stylesheet" href="./css/blink.css">
@@ -15,22 +20,23 @@
     <canvas id="canvas"></canvas>
     <canvas id="canvasimg"></canvas>
 
-    <h1 style="text-align: center; margin-top: 3rem;" class="z-index-999">FACIAL RECOGNITION</h1>
+    <h1 style="text-align: center; margin-top: 3rem; margin-bottom: 2rem;" class="z-index-999">FACIAL RECOGNITION</h1>
 
     <div id="container">
-        <!-- <video id="video-feed" height="540" width="720" autoplay></video> -->
-        <video id="hack-video" height="540" width="720" autoplay loop></video>
-        <img id="video-feed" height="540" width="720" src="./images/trial-images/oldManSerious2.png">
+        <!-- <video id="video-feed" height="480" width="720" autoplay></video> -->
+        <video id="hack-video" height="480" width="720" autoplay loop></video>
+        <img id="video-feed" height="480" width="720" src="./images/trial-images/oldManSerious2.png">
         <div id="anaylzeResults">
             <div id="screenshot-container">
-                <img id="screenshot" height="210" width="360" src="" alt="Screenshot will appear here">
+                <img id="screenshot" height="210" width="340" src="" alt="Captured Image">
                 <div class="scanning-overlay"></div>
                 <div class="scanning-bar"></div>
             </div>
+            <span id="predictive-results" style="display: none;"></span>
         </div>
     </div>
 
-    <div class="typewriter">
+    <div class="typewriter" style="margin-top: 2rem;">
         <h1 class="line1 boxdims">Hey there! Ready for some facial recognition magic?</h1>
         <h1 class="line2 boxdims">Hmm... Let me get a good look at you!</h1>
         <h1 class="line3 boxdims">Capturing your beautiful face... Hold tight, say "Cheese!"</h1>

@@ -52,11 +52,23 @@ const run = async () => {
 
         // predict the age and gender with confidence level
         faceAIData.forEach((face) => {
-            const { age, gender, genderProbability } = face
+            // const { age, gender, genderProbability } = face
+            const { age, gender, genderProbability, expressions } = face
             const genderText = `${gender} - ${Math.round(genderProbability * 100) / 100 * 100}% confidence`
             const ageText = `Age: ${Math.round(age)} years`
             const textField = new faceapi.draw.DrawTextField([genderText, ageText], face.detection.box.topRight)
             textField.draw(canvas)
+
+            // Filter and format emotions with confidence > 0%
+            // console.log(expressions)
+            const emotionsText = Object.entries(expressions)
+                .filter(([emotion, confidence]) => Math.round(confidence * 100) > 0)
+                .map(([emotion, confidence]) => `${emotion}: ${Math.round(confidence * 100)}%`)
+                .join(" \b ");
+
+            // Update the predictive results
+            const predictiveResults = document.getElementById('predictive-results');
+            predictiveResults.textContent = `\b Predictive Analysis: \b\b Gender: ${gender} \b (${Math.round(genderProbability * 100)}% confidence) \b\b Age: ${Math.round(age)} years \b\b Emotions: \b ${emotionsText}`;
         })
 
         if (!screenshotTaken) {
@@ -66,6 +78,7 @@ const run = async () => {
             // console.log("Screenshot taken:", img.src);
             context.clearRect(0, 0, canvasimg.width, canvasimg.height)
             screenshotTaken = true;
+            canvasimg.style.display = 'none';
         }
     }, 200)
 

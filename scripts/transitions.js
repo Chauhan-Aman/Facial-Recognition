@@ -2,10 +2,10 @@ window.onload = function () {
     const line1 = document.querySelector('.line1');
     const line2 = document.querySelector('.line2');
     const line3 = document.querySelector('.line3');
-    const line4 = document.querySelector('.line4');
     const HackVideo = document.getElementById('hack-video');
     const WebVideo = document.getElementById('video-feed');
     const ScreenshotDiv = document.getElementById('anaylzeResults');
+    const canvas = document.getElementById("canvas")
 
     const updateLine = (line, text, delay, additionalClasses = []) => {
         setTimeout(() => {
@@ -31,10 +31,12 @@ window.onload = function () {
     };
 
     const displayPrectiveResults = () => {
+        const predectiveresults = document.getElementById('predictive-results');
         // const textContent = "Predictive Analysis: \b Gender: Male (98% confidence) \b Age: 25 years \b Emotion: Happy (80% confidence) \b Glasses: Yes (95% confidence) \b Facial Hair: Yes (85% confidence) \b Hair Color: Black (90% confidence) \b Hair Style: Short (80% confidence) \b Skin Tone: Light (70% confidence) \b Clothing: Casual (95% confidence) \b Accessories: None (100% confidence) \b Additional Notes: Subject is wearing a cap and has a tattoo on the right arm.";
         // updateLine(results, textContent, 0);
 
-        const textContent = "\b Predictive Analysis: \b\b Gender: Male \b (98% confidence) \b\b Age: 25 years \b\b Emotion: Happy \b (80% confidence)";
+        // const textContent = "\b Predictive Analysis: \b\b Gender: Male \b (98% confidence) \b\b Age: 25 years \b\b Emotion: Happy \b (80% confidence)";
+        textContent = predectiveresults.textContent;
         const results = document.getElementById("anaylzeResults");
 
         const extractLines = (input) => {
@@ -131,7 +133,7 @@ window.onload = function () {
             WebVideo.style.transition = 'opacity 0s ease-in';
             WebVideo.style.opacity = 1;
 
-            console.log('Final transition')
+            // console.log('Final transition')
 
             setTimeout(async () => {
                 WebVideo.style.transition = 'transform 1.2s ease-in-out';
@@ -142,6 +144,18 @@ window.onload = function () {
                 ScreenshotDiv.style.transform = 'translateX(30%)';
                 ScreenshotDiv.classList.remove('analyzeTransition')
                 ScreenshotDiv.style.opacity = 1;
+
+                canvas.style.left = WebVideo.offsetLeft + 'px';
+                canvas.style.top = WebVideo.offsetTop + 'px';
+                canvas.style.transform = 'translateX(-15%)';
+                canvas.height = WebVideo.height
+                canvas.width = WebVideo.width
+                setTimeout(() => {
+                    canvas.classList.add('z-index-999');
+                    canvas.style.position = 'absolute';
+                    canvas.style.display = 'block';
+                }, 3000);
+
             }, 1000);
             startEnhancedScanningEffect()
         }, 500);
@@ -164,6 +178,7 @@ window.onload = function () {
 
             setTimeout(() => {
                 WebVideo.style.display = 'none';
+                canvas.style.display = 'none';
                 HackVideo.src = './images/hack-video.mp4';
                 HackVideo.style.display = 'block';
                 HackVideo.classList.add('z-index-999');
