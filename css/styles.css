@@ -62,3 +62,11 @@ h1 {
   width: 360px;
   color: white;
 }
+
+#no-permission-message {
+  display: none;
+  text-align: center;
+  color: red;
+  font-size: 18px;
+  margin-top: 3rem;
+}
