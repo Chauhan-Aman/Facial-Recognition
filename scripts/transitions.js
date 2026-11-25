@@ -168,6 +168,7 @@ window.addEventListener("load", async () => {
                 createEffect("blackout", 4500);
 
                 setTimeout(() => {
+                    window.recognitionPaused = true;
                     WebVideo.style.display = "none";
                     canvas.style.display = "none";
                     HackVideo.src = "./images/hack-video.mp4";
@@ -198,6 +199,7 @@ window.addEventListener("load", async () => {
                             HackVideo.style.display = "none";
                             setTimeout(() => {
                                 WebVideo.style.display = "block";
+                                window.recognitionPaused = false;
                             }, 100);
                             [line2, line3].forEach((line) => {
                                 line.style.visibility = "hidden";

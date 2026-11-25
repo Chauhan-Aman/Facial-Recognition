@@ -36,20 +36,20 @@ This document captures the current bottlenecks, bugs, and optimization plan for 
 
 - [x] **Remove unused `faceRecognitionNet` & `.withFaceDescriptors()`**
   - Eliminates ~6.46 MB of model downloads on startup and removes heavy 128-d descriptor inference on every frame (`scripts/Script.js:30, 57`).
-- [ ] **Use `TinyFaceDetector` + `faceLandmark68TinyNet` by default**
+- [x] **Use `TinyFaceDetector` + `faceLandmark68TinyNet` by default**
   - Reduces initial model payload from ~13.2 MB down to ~1.05 MB (>90% reduction) and significantly improves FPS on CPU/integrated GPUs.
   - Expose a **Speed vs. Accuracy** toggle (`TinyFaceDetector` vs. `SSD MobileNet v1`) and tune `TinyFaceDetectorOptions` (`inputSize: 320` or `416`, `scoreThreshold: 0.5`).
-- [ ] **Replace overlapping `setInterval(..., 200)` with a non-overlapping loop**
+- [x] **Replace overlapping `setInterval(..., 200)` with a non-overlapping loop**
   - **Current:** `scripts/Script.js:53-92` fires every 200 ms without waiting for the previous `await faceapi.detectAllFaces(...)` to finish, causing queued frames and WebGL/main-thread contention on slower devices.
   - **Fix:** Use a self-scheduling `requestAnimationFrame` (or async loop with `setTimeout` after inference completes), guard with `video.readyState >= 2 && !video.paused`, and **pause inference** whenever the webcam feed is hidden (e.g., during the `hack-video.mp4` sequence or when the browser tab is backgrounded via `document.hidden`).
-- [ ] **Decouple lightweight tracking from heavy attribute prediction**
+- [x] **Decouple lightweight tracking from heavy attribute prediction**
   - Run face detection + landmarks every frame (or target ~15–20 FPS) while running `ageGenderNet` / `faceExpressionNet` every N frames (or smoothing predictions with a rolling average to stop jittery age/gender/emotion numbers).
 
 ---
 
 ## 3. Rendering, DOM & Asset Efficiency
 
-- [ ] **Cache Canvas Contexts & DOM References**
+- [x] **Cache Canvas Contexts & DOM References**
   - **Current:** `canvas.getContext("2d")` and `document.getElementById('predictive-results')` are queried inside the detection loop every tick (`scripts/Script.js:61, 81`), and `new faceapi.draw.DrawTextField(...)` is instantiated per face per tick.
   - **Fix:** Cache `canvasCtx`, `screenshotCtx`, and all DOM element references once during setup.
 - [ ] **Sync `#screenshot` capture with the countdown**

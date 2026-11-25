@@ -73,3 +73,42 @@ h1 {
   font-size: 18px;
   margin-top: 3rem;
 }
+
+#controls-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0 auto 1.25rem;
+  padding: 0.5rem 1rem;
+  width: fit-content;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  background: rgba(18, 22, 29, 0.9);
+  color: #d8dee9;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.9rem;
+}
+
+#controls-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+#detector-mode {
+  background: #0d1117;
+  color: #f0f6fc;
+  border: 1px solid #3b4252;
+  border-radius: 5px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+#perf-stats {
+  color: #7ee787;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}

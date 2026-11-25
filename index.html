@@ -21,7 +21,21 @@
     <canvas id="canvas"></canvas>
     <canvas id="canvasimg"></canvas>
     
-    <h1 style="text-align: center; margin-top: 3rem; margin-bottom: 2rem;" class="z-index-999">FACIAL RECOGNITION</h1>
+    <h1 style="text-align: center; margin-top: 2rem; margin-bottom: 1rem;" class="z-index-999">FACIAL RECOGNITION</h1>
+    <div id="controls-bar">
+        <label for="detector-mode">
+            Detector:
+            <select id="detector-mode" aria-label="Face detector mode">
+                <option value="tiny" selected>Fast (TinyFace ~1 MB)</option>
+                <option value="ssd">Accurate (SSD MobileNet ~6.7 MB)</option>
+            </select>
+        </label>
+        <label class="toggle-label" for="toggle-landmarks">
+            <input type="checkbox" id="toggle-landmarks" checked>
+            Landmarks
+        </label>
+        <span id="perf-stats" aria-live="polite">Loading models...</span>
+    </div>
     <div id="no-permission-message">
         No camera permission given. Please enable camera access to CONTINUE.
     </div>
