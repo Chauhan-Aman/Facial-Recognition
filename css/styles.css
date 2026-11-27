@@ -135,7 +135,8 @@ body {
   letter-spacing: 0.05em;
 }
 
-#detector-mode {
+#detector-mode,
+#camera-select {
   background-color: var(--bg-canvas);
   color: var(--ink-primary);
   border: 1px solid var(--border-strong);
@@ -144,9 +145,11 @@ body {
   font-size: 0.8rem;
   font-family: var(--font-sans);
   cursor: pointer;
+  max-width: 180px;
 }
 
 #detector-mode:focus-visible,
+#camera-select:focus-visible,
 .btn:focus-visible,
 input[type="checkbox"]:focus-visible {
   outline: 2px solid var(--accent);
@@ -252,6 +255,12 @@ input[type="checkbox"]:focus-visible {
   color: var(--ink-secondary);
 }
 
+.permission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
 .workspace {
   display: grid;
   width: 100%;
@@ -262,7 +271,15 @@ input[type="checkbox"]:focus-visible {
 }
 
 .workspace.has-inspector {
-  grid-template-columns: minmax(0, 1.45fr) minmax(330px, 390px);
+  grid-template-columns: minmax(0, 1.45fr) minmax(330px, 400px);
+}
+
+.workspace.photo-only {
+  grid-template-columns: minmax(0, 440px);
+}
+
+.workspace.photo-only .stage-column {
+  display: none;
 }
 
 .stage-column {
@@ -409,7 +426,8 @@ input[type="checkbox"]:focus-visible {
 .inspector-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .source-switch {

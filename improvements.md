@@ -58,9 +58,8 @@ This document captures the current bottlenecks, bugs, and optimization plan for 
 - [x] **Responsive Canvas Alignment**
   - **Current:** `canvas.style.left` / `top` are set using `offsetLeft` / `offsetTop` at startup and manually offset during `performFinalTransition()`.
   - **Fix:** Wrap `<video>` and `<canvas>` in a `position: relative` container so the overlay canvas automatically stays aligned on resize and CSS transitions.
-- [ ] **Asset Cleanup / Lazy Loading**
-  - `images/trial-images/` contains ~13.8 MB of unused PNGs, and `images/hack-video.mp4` is ~2.98 MB.
-  - Keep `hack-video.mp4` lazy-loaded only if the intro prank is enabled, and either remove unused trial PNGs or compress them to WebP for an optional demo image tester.
+- [x] **Asset Cleanup / Lazy Loading**
+  - Removed ~13.8 MB of unused PNGs from `images/trial-images/`; `images/hack-video.mp4` (~2.98 MB) is lazy-loaded only during the prank sequence and released on completion/skip.
 
 ---
 
@@ -71,10 +70,10 @@ This document captures the current bottlenecks, bugs, and optimization plan for 
   - **Fix:** Refactor into clean `async`/`await` steps with an `AbortController` so the timeline can be cancelled or skipped cleanly.
 - [x] **Add "Skip Intro" / "Instant Analysis" Mode**
   - Let users jump straight to real-time detection + live predictive readout instead of waiting ~40 seconds on repeat visits.
-- [ ] **Remove or archive unused legacy scripts**
-  - `scripts/PredictionsScript.js`, `scripts/newtyping.js`, and `scripts/typingtrials.js` are commented out in `index.html` and superseded by `Script.js` and `transitions.js`.
+- [x] **Remove or archive unused legacy scripts**
+  - Removed unused `scripts/PredictionsScript.js`, `scripts/newtyping.js`, and `scripts/typingtrials.js`.
 - [x] **Add live performance & confidence telemetry**
-  - Optionally show real-time FPS / inference latency (ms), smoothed age/gender/emotion bars, and a clean "Retake / Switch Camera / Upload Image" control bar.
+  - Displays live FPS / inference latency (`ms`), smoothed age/gender/emotion bars, `Live` / `Snapshot` switching, multi-camera selector, and local photo upload fallback.
 
 ---
 

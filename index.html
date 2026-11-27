@@ -10,10 +10,10 @@
         content="Facial Recognition, AI, Machine Learning, Age Detection, Gender Prediction, Emotion Analysis, Real-time Scanning">
     <meta name="author" content="Aman Chauhan">
     <title>Facial Recognition</title>
-    <link rel="stylesheet" href="./css/styles.css?v=4">
-    <link rel="stylesheet" href="./css/typing.css?v=4">
-    <link rel="stylesheet" href="./css/blink.css?v=4">
-    <link rel="stylesheet" href="./css/GridScan.css?v=4">
+    <link rel="stylesheet" href="./css/styles.css?v=5">
+    <link rel="stylesheet" href="./css/typing.css?v=5">
+    <link rel="stylesheet" href="./css/blink.css?v=5">
+    <link rel="stylesheet" href="./css/GridScan.css?v=5">
 </head>
 
 <body>
@@ -25,6 +25,11 @@
         </div>
 
         <div id="controls-bar" class="controls-bar">
+            <label id="camera-select-wrap" class="control-item" for="camera-select" hidden>
+                <span class="control-label">Camera</span>
+                <select id="camera-select" aria-label="Camera device"></select>
+            </label>
+
             <label class="control-item" for="detector-mode">
                 <span class="control-label">Detector</span>
                 <select id="detector-mode" aria-label="Face detector mode">
@@ -47,8 +52,11 @@
     <main class="app-main">
         <div id="no-permission-message" class="permission-panel" role="alert">
             <p class="permission-title">Camera access required</p>
-            <p class="permission-desc">Enable camera permissions in your browser to run real-time facial analysis locally.</p>
-            <button id="retry-camera-btn" class="btn btn-primary" type="button">Retry Camera</button>
+            <p class="permission-desc">Enable camera permissions to run live tracking, or analyze a local photo instead.</p>
+            <div class="permission-actions">
+                <button id="retry-camera-btn" class="btn btn-primary" type="button">Retry Camera</button>
+                <button id="upload-fallback-btn" class="btn btn-ghost" type="button">Analyze a Photo</button>
+            </div>
         </div>
 
         <section id="container" class="workspace" aria-label="Recognition workspace">
@@ -82,6 +90,8 @@
                             <button id="source-snap-btn" class="source-btn" type="button" disabled>Snapshot</button>
                         </div>
                         <button id="retake-btn" class="btn btn-primary btn-sm" type="button">Capture</button>
+                        <button id="upload-photo-btn" class="btn btn-ghost btn-sm" type="button">Upload</button>
+                        <input id="photo-upload-input" type="file" accept="image/*" hidden>
                     </div>
                 </div>
 
@@ -137,8 +147,8 @@
     <canvas id="canvasimg" hidden></canvas>
 
     <script src="./scripts/face-api.min.js"></script>
-    <script src="./scripts/Script.js?v=4"></script>
-    <script src="./scripts/transitions.js?v=4"></script>
+    <script src="./scripts/Script.js?v=5"></script>
+    <script src="./scripts/transitions.js?v=5"></script>
 </body>
 
 </html>

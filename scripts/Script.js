@@ -410,25 +410,83 @@ const setStatusIndicator = (state, badgeText) => {
     }
 };
 
+let activeStream = null;
+const stopCurrentStream = () => {
+    if (!activeStream) return;
+    activeStream.getTracks().forEach((track) => track.stop());
+    activeStream = null;
+};
+
+window.addEventListener("pagehide", stopCurrentStream);
+
+const syncStageAspect = (videoFeedEl) => {
+    const vw = videoFeedEl.videoWidth || 720;
+    const vh = videoFeedEl.videoHeight || 480;
+    const aspect = `${vw} / ${vh}`;
+    const feedStage = document.getElementById("feed-stage");
+    const screenshotContainer = document.getElementById("screenshot-container");
+    if (feedStage) feedStage.style.aspectRatio = aspect;
+    if (screenshotContainer && !screenshotContainer.dataset.customAspect) {
+        screenshotContainer.style.aspectRatio = aspect;
+    }
+};
+
+const populateCameraDevices = async (activeDeviceId = null) => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const wrap = document.getElementById("camera-select-wrap");
+    const select = document.getElementById("camera-select");
+    if (!wrap || !select) return;
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter((d) => d.kind === "videoinput");
+    if (videoInputs.length <= 1) {
+        wrap.hidden = true;
+        return;
+    }
+
+    select.textContent = "";
+    videoInputs.forEach((device, idx) => {
+        const opt = document.createElement("option");
+        opt.value = device.deviceId;
+        opt.textContent = device.label || `Camera ${idx + 1}`;
+        if (activeDeviceId && device.deviceId === activeDeviceId) {
+            opt.selected = true;
+        }
+        select.appendChild(opt);
+    });
+    wrap.hidden = false;
+};
+
 /**
- * Requests camera permission once and exposes a shared promise + retry capability.
+ * Requests camera permission and attaches the active stream to #video-feed.
  */
-const initCamera = async () => {
+const initCamera = async (deviceId = null) => {
+    stopCurrentStream();
+
+    const videoConstraints = deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 720 }, height: { ideal: 480 } }
+        : { width: { ideal: 720 }, height: { ideal: 480 }, facingMode: "user" };
+
     const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-            width: { ideal: 720 },
-            height: { ideal: 480 },
-            facingMode: "user",
-        },
+        video: videoConstraints,
         audio: false,
     });
 
+    activeStream = stream;
     cameraPermissionGranted = true;
-    document.getElementById("container").style.display = "grid";
+
+    const workspace = document.getElementById("container");
+    workspace.classList.remove("photo-only");
+    workspace.style.display = "grid";
     document.getElementById("controls-bar").style.display = "flex";
     document.getElementById("no-permission-message").style.display = "none";
+
     const introBtn = document.getElementById("intro-toggle-btn");
+    const sourceLiveBtn = document.getElementById("source-live-btn");
+    const retakeBtn = document.getElementById("retake-btn");
     if (introBtn) introBtn.disabled = false;
+    if (sourceLiveBtn) sourceLiveBtn.disabled = false;
+    if (retakeBtn) retakeBtn.disabled = false;
 
     const videoFeedEl = document.getElementById("video-feed");
     videoFeedEl.srcObject = stream;
@@ -440,13 +498,11 @@ const initCamera = async () => {
         videoFeedEl.addEventListener("loadedmetadata", resolve, { once: true });
     });
 
-    const vw = videoFeedEl.videoWidth || 720;
-    const vh = videoFeedEl.videoHeight || 480;
-    const aspect = `${vw} / ${vh}`;
-    const feedStage = document.getElementById("feed-stage");
-    const screenshotContainer = document.getElementById("screenshot-container");
-    if (feedStage) feedStage.style.aspectRatio = aspect;
-    if (screenshotContainer) screenshotContainer.style.aspectRatio = aspect;
+    syncStageAspect(videoFeedEl);
+
+    const activeTrack = stream.getVideoTracks()[0];
+    const activeDeviceId = activeTrack?.getSettings?.().deviceId || deviceId;
+    await populateCameraDevices(activeDeviceId);
 
     const placeholder = document.getElementById("camera-placeholder");
     if (placeholder) placeholder.classList.add("is-hidden");
@@ -457,340 +513,454 @@ const initCamera = async () => {
 
 window.cameraReadyPromise = initCamera();
 
-const run = async () => {
-    try {
-        const { videoFeedEl } = await window.cameraReadyPromise;
+document.addEventListener("DOMContentLoaded", () => {
+    const workspace = document.getElementById("container");
+    const inspector = document.getElementById("analyze-results");
+    const videoFeedEl = document.getElementById("video-feed");
+    const canvas = document.getElementById("canvas");
+    const canvasCtx = canvas.getContext("2d");
+    const img = document.getElementById("screenshot");
+    const screenshotFrame = document.getElementById("screenshot-container");
+    const captureMetaEl = document.getElementById("capture-meta");
+    const retakeBtn = document.getElementById("retake-btn");
+    const uploadPhotoBtn = document.getElementById("upload-photo-btn");
+    const uploadFallbackBtn = document.getElementById("upload-fallback-btn");
+    const photoUploadInput = document.getElementById("photo-upload-input");
+    const sourceLiveBtn = document.getElementById("source-live-btn");
+    const sourceSnapBtn = document.getElementById("source-snap-btn");
+    const cameraSelect = document.getElementById("camera-select");
+    const retryBtn = document.getElementById("retry-camera-btn");
+    const detectorSelect = document.getElementById("detector-mode");
+    const landmarksToggle = document.getElementById("toggle-landmarks");
+    const perfStatsEl = document.getElementById("perf-stats");
+    const canvasimg = document.getElementById("canvasimg");
+    const screenshotCtx = canvasimg.getContext("2d");
 
-        const canvas = document.getElementById("canvas");
-        const canvasCtx = canvas.getContext("2d");
-        const img = document.getElementById("screenshot");
-        const screenshotFrame = document.getElementById("screenshot-container");
-        const captureMetaEl = document.getElementById("capture-meta");
-        const retakeBtn = document.getElementById("retake-btn");
-        const sourceLiveBtn = document.getElementById("source-live-btn");
-        const sourceSnapBtn = document.getElementById("source-snap-btn");
-        const canvasimg = document.getElementById("canvasimg");
-        const screenshotCtx = canvasimg.getContext("2d");
-        const detectorSelect = document.getElementById("detector-mode");
-        const landmarksToggle = document.getElementById("toggle-landmarks");
-        const perfStatsEl = document.getElementById("perf-stats");
+    const readoutRenderer = createReadoutRenderer();
+    const frameCanvas = document.createElement("canvas");
+    const frameCtx = frameCanvas.getContext("2d");
+    const tracker = createAttributeTracker();
 
-        const readoutRenderer = createReadoutRenderer();
-        const frameCanvas = document.createElement("canvas");
-        const frameCtx = frameCanvas.getContext("2d");
+    let activeMode = detectorSelect ? detectorSelect.value : "tiny";
+    let showLandmarks = landmarksToggle ? landmarksToggle.checked : true;
+    let isSwitchingModel = false;
+    let isSwitchingCamera = false;
+    let readoutSource = "live"; // "live" | "snapshot"
+    let snapshotPredictions = [];
+    let scanTimerId = null;
+    let uploadedObjectUrl = null;
+    let loopStarted = false;
+    let isDetecting = false;
+    let lastFrameTime = 0;
+    let lastAttributeTime = 0;
+    let emaLatencyMs = 0;
+    let canvasHasDrawing = false;
 
-        const syncCanvasResolution = () => {
-            const vw = videoFeedEl.videoWidth || 720;
-            const vh = videoFeedEl.videoHeight || 480;
-            if (canvas.width !== vw || canvas.height !== vh) {
-                canvas.width = vw;
-                canvas.height = vh;
-            }
-            if (frameCanvas.width !== vw || frameCanvas.height !== vh) {
-                frameCanvas.width = vw;
-                frameCanvas.height = vh;
-            }
-        };
+    const triggerScanSweep = () => {
+        if (scanTimerId) clearTimeout(scanTimerId);
+        screenshotFrame.classList.add("is-scanning");
+        scanTimerId = setTimeout(() => {
+            screenshotFrame.classList.remove("is-scanning");
+            scanTimerId = null;
+        }, 1300);
+    };
 
-        syncCanvasResolution();
+    const setReadoutSource = (nextSource) => {
+        readoutSource = nextSource;
+        if (sourceLiveBtn) sourceLiveBtn.classList.toggle("is-active", nextSource === "live");
+        if (sourceSnapBtn) sourceSnapBtn.classList.toggle("is-active", nextSource === "snapshot");
 
-        let activeMode = detectorSelect ? detectorSelect.value : "tiny";
-        let showLandmarks = landmarksToggle ? landmarksToggle.checked : true;
-        let isSwitchingModel = false;
-        let readoutSource = "live"; // "live" | "snapshot"
-        let snapshotPredictions = [];
-        let scanTimerId = null;
-
-        const setReadoutSource = (nextSource) => {
-            readoutSource = nextSource;
-            if (sourceLiveBtn) sourceLiveBtn.classList.toggle("is-active", nextSource === "live");
-            if (sourceSnapBtn) sourceSnapBtn.classList.toggle("is-active", nextSource === "snapshot");
-
-            if (nextSource === "snapshot") {
-                readoutRenderer.render(
-                    snapshotPredictions,
-                    "No face detected in the captured snapshot. Click Retake to capture again."
-                );
-            } else {
-                readoutRenderer.render(window.latestFacePredictions);
-            }
-        };
-
-        if (sourceLiveBtn) {
-            sourceLiveBtn.addEventListener("click", () => setReadoutSource("live"));
+        if (nextSource === "snapshot") {
+            readoutRenderer.render(
+                snapshotPredictions,
+                "No face detected in this snapshot. Click Retake or Upload another photo."
+            );
+        } else {
+            readoutRenderer.render(window.latestFacePredictions);
         }
-        if (sourceSnapBtn) {
-            sourceSnapBtn.addEventListener("click", () => {
-                if (!sourceSnapBtn.disabled) setReadoutSource("snapshot");
+    };
+
+    const analyzeSnapshotSource = async (sourceEl) => {
+        await ensureModelsLoaded(activeMode);
+        const detectorOptions = activeMode === "ssd"
+            ? SSD_DETECTOR_OPTIONS
+            : TINY_DETECTOR_OPTIONS;
+        const useTinyLandmarks = activeMode !== "ssd";
+
+        const dets = await faceapi
+            .detectAllFaces(sourceEl, detectorOptions)
+            .withFaceLandmarks(useTinyLandmarks)
+            .withAgeAndGender()
+            .withFaceExpressions();
+
+        snapshotPredictions = formatFacePredictions(dets);
+        if (readoutSource === "snapshot") {
+            setReadoutSource("snapshot");
+        }
+    };
+
+    window.captureSnapshot = async ({ scan = true, switchToSnapshot = false } = {}) => {
+        if (!cameraPermissionGranted || videoFeedEl.readyState < 2) return false;
+        if (uploadedObjectUrl) {
+            URL.revokeObjectURL(uploadedObjectUrl);
+            uploadedObjectUrl = null;
+        }
+        delete screenshotFrame.dataset.customAspect;
+        syncStageAspect(videoFeedEl);
+
+        const vw = videoFeedEl.videoWidth || 720;
+        const vh = videoFeedEl.videoHeight || 480;
+        canvasimg.width = vw;
+        canvasimg.height = vh;
+        screenshotCtx.drawImage(videoFeedEl, 0, 0, vw, vh);
+        img.src = canvasimg.toDataURL("image/png");
+
+        img.classList.add("has-image");
+        screenshotFrame.classList.add("has-capture");
+        if (retakeBtn) retakeBtn.textContent = "Retake";
+        if (sourceSnapBtn) sourceSnapBtn.disabled = false;
+        if (captureMetaEl) {
+            captureMetaEl.hidden = false;
+            captureMetaEl.textContent = new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
             });
         }
 
-        const analyzeSnapshotCanvas = async (snapCanvas) => {
-            if (!faceapi.nets.ageGenderNet.isLoaded || !faceapi.nets.faceExpressionNet.isLoaded) {
-                return;
+        if (scan) triggerScanSweep();
+
+        try {
+            await analyzeSnapshotSource(canvasimg);
+            if (switchToSnapshot) {
+                setReadoutSource("snapshot");
             }
+        } finally {
+            screenshotCtx.clearRect(0, 0, vw, vh);
+        }
+        return true;
+    };
+
+    const handlePhotoUpload = async (file) => {
+        if (!file) return;
+        if (uploadedObjectUrl) {
+            URL.revokeObjectURL(uploadedObjectUrl);
+        }
+        uploadedObjectUrl = URL.createObjectURL(file);
+
+        img.src = uploadedObjectUrl;
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+        });
+
+        if (img.naturalWidth && img.naturalHeight) {
+            screenshotFrame.dataset.customAspect = "1";
+            screenshotFrame.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+        }
+
+        img.classList.add("has-image");
+        screenshotFrame.classList.add("has-capture");
+        if (sourceSnapBtn) sourceSnapBtn.disabled = false;
+        if (captureMetaEl) {
+            captureMetaEl.hidden = false;
+            captureMetaEl.textContent = "Uploaded";
+        }
+
+        if (!cameraPermissionGranted) {
+            document.getElementById("no-permission-message").style.display = "none";
+            workspace.style.display = "grid";
+            workspace.classList.add("has-inspector", "photo-only");
+            inspector.classList.add("is-visible", "is-entered");
+            if (sourceLiveBtn) sourceLiveBtn.disabled = true;
+            if (retakeBtn) retakeBtn.disabled = true;
+            setStatusIndicator("live", "Photo Mode");
+            if (perfStatsEl) perfStatsEl.textContent = "Local photo analysis";
+        } else {
+            workspace.classList.add("has-inspector");
+            inspector.classList.add("is-visible", "is-entered");
+        }
+
+        triggerScanSweep();
+        readoutSource = "snapshot";
+        setReadoutSource("snapshot");
+        await analyzeSnapshotSource(img);
+    };
+
+    if (sourceLiveBtn) {
+        sourceLiveBtn.addEventListener("click", () => {
+            if (!sourceLiveBtn.disabled) setReadoutSource("live");
+        });
+    }
+    if (sourceSnapBtn) {
+        sourceSnapBtn.addEventListener("click", () => {
+            if (!sourceSnapBtn.disabled) setReadoutSource("snapshot");
+        });
+    }
+    if (retakeBtn) {
+        retakeBtn.addEventListener("click", () => {
+            window.captureSnapshot({ scan: true, switchToSnapshot: true });
+        });
+    }
+    const triggerFilePicker = () => {
+        if (photoUploadInput) {
+            photoUploadInput.value = "";
+            photoUploadInput.click();
+        }
+    };
+    if (uploadPhotoBtn) uploadPhotoBtn.addEventListener("click", triggerFilePicker);
+    if (uploadFallbackBtn) uploadFallbackBtn.addEventListener("click", triggerFilePicker);
+    if (photoUploadInput) {
+        photoUploadInput.addEventListener("change", (event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+                handlePhotoUpload(file).catch((err) => {
+                    console.error("Failed to analyze uploaded photo:", err);
+                    readoutRenderer.render([], "Unable to load that image file. Try a PNG or JPEG photo.");
+                });
+            }
+        });
+    }
+
+    if (detectorSelect) {
+        detectorSelect.addEventListener("change", async (event) => {
+            const nextMode = event.target.value;
+            isSwitchingModel = true;
+            setStatusIndicator("loading", "Switching");
+            if (perfStatsEl) {
+                perfStatsEl.textContent = nextMode === "ssd"
+                    ? "Loading SSD MobileNet..."
+                    : "Switching to TinyFace...";
+            }
+            try {
+                await ensureModelsLoaded(nextMode);
+                activeMode = nextMode;
+                if (img.classList.contains("has-image")) {
+                    await analyzeSnapshotSource(img);
+                }
+                if (!cameraPermissionGranted) {
+                    setStatusIndicator("live", "Photo Mode");
+                    if (perfStatsEl) perfStatsEl.textContent = "Local photo analysis";
+                } else {
+                    setStatusIndicator(
+                        window.recognitionPaused ? "paused" : "live",
+                        window.recognitionPaused ? "Paused" : "Live"
+                    );
+                }
+            } finally {
+                isSwitchingModel = false;
+            }
+        });
+    }
+
+    if (landmarksToggle) {
+        landmarksToggle.addEventListener("change", (event) => {
+            showLandmarks = event.target.checked;
+        });
+    }
+
+    if (cameraSelect) {
+        cameraSelect.addEventListener("change", async (event) => {
+            const nextDeviceId = event.target.value;
+            if (!nextDeviceId) return;
+            isSwitchingCamera = true;
+            setStatusIndicator("loading", "Switching Camera");
+            try {
+                await initCamera(nextDeviceId);
+                tracker.reset();
+                lastAttributeTime = 0;
+                setStatusIndicator(
+                    window.recognitionPaused ? "paused" : "live",
+                    window.recognitionPaused ? "Paused" : "Live"
+                );
+            } catch (err) {
+                console.error("Failed to switch camera:", err);
+                setStatusIndicator("error", "Camera Error");
+            } finally {
+                isSwitchingCamera = false;
+            }
+        });
+    }
+
+    window.setRecognitionPaused = (paused) => {
+        window.recognitionPaused = Boolean(paused);
+        if (window.recognitionPaused) {
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            setStatusIndicator("paused", "Paused");
+        } else if (cameraPermissionGranted) {
+            setStatusIndicator("live", "Live");
+        }
+    };
+
+    const syncCanvasResolution = () => {
+        const vw = videoFeedEl.videoWidth || 720;
+        const vh = videoFeedEl.videoHeight || 480;
+        if (canvas.width !== vw || canvas.height !== vh) {
+            canvas.width = vw;
+            canvas.height = vh;
+        }
+        if (frameCanvas.width !== vw || frameCanvas.height !== vh) {
+            frameCanvas.width = vw;
+            frameCanvas.height = vh;
+        }
+    };
+
+    const clearOverlay = () => {
+        if (canvasHasDrawing) {
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            canvasHasDrawing = false;
+        }
+    };
+
+    const runInferenceTick = async (now) => {
+        if (
+            !cameraPermissionGranted ||
+            isDetecting ||
+            isSwitchingModel ||
+            isSwitchingCamera ||
+            document.hidden ||
+            window.recognitionPaused ||
+            videoFeedEl.readyState < 2 ||
+            videoFeedEl.paused ||
+            videoFeedEl.style.display === "none"
+        ) {
+            if (window.recognitionPaused || videoFeedEl.style.display === "none") {
+                clearOverlay();
+            }
+            return;
+        }
+
+        if (now - lastFrameTime < TARGET_FRAME_INTERVAL_MS) {
+            return;
+        }
+
+        isDetecting = true;
+        lastFrameTime = now;
+        const tickStart = performance.now();
+
+        try {
+            syncCanvasResolution();
+            frameCtx.drawImage(videoFeedEl, 0, 0, frameCanvas.width, frameCanvas.height);
+
             const detectorOptions = activeMode === "ssd"
                 ? SSD_DETECTOR_OPTIONS
                 : TINY_DETECTOR_OPTIONS;
             const useTinyLandmarks = activeMode !== "ssd";
 
-            const dets = await faceapi
-                .detectAllFaces(snapCanvas, detectorOptions)
-                .withFaceLandmarks(useTinyLandmarks)
-                .withAgeAndGender()
-                .withFaceExpressions();
+            const detections = showLandmarks
+                ? await faceapi
+                    .detectAllFaces(frameCanvas, detectorOptions)
+                    .withFaceLandmarks(useTinyLandmarks)
+                : await faceapi.detectAllFaces(frameCanvas, detectorOptions);
 
-            snapshotPredictions = formatFacePredictions(dets);
-            if (readoutSource === "snapshot") {
-                setReadoutSource("snapshot");
-            }
-        };
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
 
-        window.captureSnapshot = async ({ scan = true, switchToSnapshot = false } = {}) => {
-            if (videoFeedEl.readyState < 2) return false;
-            const vw = videoFeedEl.videoWidth || 720;
-            const vh = videoFeedEl.videoHeight || 480;
-            canvasimg.width = vw;
-            canvasimg.height = vh;
-            screenshotCtx.drawImage(videoFeedEl, 0, 0, vw, vh);
-            img.src = canvasimg.toDataURL("image/png");
-
-            img.classList.add("has-image");
-            screenshotFrame.classList.add("has-capture");
-            if (retakeBtn) retakeBtn.textContent = "Retake";
-            if (sourceSnapBtn) sourceSnapBtn.disabled = false;
-            if (captureMetaEl) {
-                captureMetaEl.hidden = false;
-                captureMetaEl.textContent = new Date().toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                });
-            }
-
-            if (scan) {
-                if (scanTimerId) clearTimeout(scanTimerId);
-                screenshotFrame.classList.add("is-scanning");
-                scanTimerId = setTimeout(() => {
-                    screenshotFrame.classList.remove("is-scanning");
-                    scanTimerId = null;
-                }, 1300);
-            }
-
-            try {
-                await analyzeSnapshotCanvas(canvasimg);
-                if (switchToSnapshot) {
-                    setReadoutSource("snapshot");
+            if (detections.length === 0) {
+                tracker.reset();
+                window.latestFacePredictions = [];
+                if (readoutSource === "live") {
+                    readoutRenderer.render([]);
                 }
-            } finally {
-                screenshotCtx.clearRect(0, 0, vw, vh);
-            }
-            return true;
-        };
-
-        if (retakeBtn) {
-            retakeBtn.addEventListener("click", () => {
-                window.captureSnapshot({ scan: true, switchToSnapshot: true });
-            });
-        }
-
-        window.setRecognitionPaused = (paused) => {
-            window.recognitionPaused = Boolean(paused);
-            if (window.recognitionPaused) {
-                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-                setStatusIndicator("paused", "Paused");
-            } else {
-                setStatusIndicator("live", "Live");
-            }
-        };
-
-        if (perfStatsEl) {
-            perfStatsEl.textContent = "Loading TinyFace (~1.05 MB)...";
-        }
-        await ensureModelsLoaded(activeMode);
-        setStatusIndicator("live", "Live");
-
-        if (detectorSelect) {
-            detectorSelect.addEventListener("change", async (event) => {
-                const nextMode = event.target.value;
-                isSwitchingModel = true;
-                setStatusIndicator("loading", "Switching");
-                if (perfStatsEl) {
-                    perfStatsEl.textContent = nextMode === "ssd"
-                        ? "Loading SSD MobileNet..."
-                        : "Switching to TinyFace...";
-                }
-                try {
-                    await ensureModelsLoaded(nextMode);
-                    activeMode = nextMode;
-                    if (img.classList.contains("has-image")) {
-                        analyzeSnapshotCanvas(img).catch(() => {});
-                    }
-                    setStatusIndicator(
-                        window.recognitionPaused ? "paused" : "live",
-                        window.recognitionPaused ? "Paused" : "Live"
-                    );
-                } finally {
-                    isSwitchingModel = false;
-                }
-            });
-        }
-
-        if (landmarksToggle) {
-            landmarksToggle.addEventListener("change", (event) => {
-                showLandmarks = event.target.checked;
-            });
-        }
-
-        const tracker = createAttributeTracker();
-        let isDetecting = false;
-        let lastFrameTime = 0;
-        let lastAttributeTime = 0;
-        let emaLatencyMs = 0;
-        let canvasHasDrawing = false;
-
-        const clearOverlay = () => {
-            if (canvasHasDrawing) {
-                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
                 canvasHasDrawing = false;
-            }
-        };
+            } else {
+                const needAttributeRefresh =
+                    !tracker.hasAllAttributes(detections) ||
+                    now - lastAttributeTime >= ATTRIBUTE_REFRESH_MS;
 
-        const runInferenceTick = async (now) => {
-            if (
-                isDetecting ||
-                isSwitchingModel ||
-                document.hidden ||
-                window.recognitionPaused ||
-                videoFeedEl.readyState < 2 ||
-                videoFeedEl.paused ||
-                videoFeedEl.style.display === "none"
-            ) {
-                if (window.recognitionPaused || videoFeedEl.style.display === "none") {
-                    clearOverlay();
-                }
-                return;
-            }
-
-            if (now - lastFrameTime < TARGET_FRAME_INTERVAL_MS) {
-                return;
-            }
-
-            isDetecting = true;
-            lastFrameTime = now;
-            const tickStart = performance.now();
-
-            try {
-                syncCanvasResolution();
-                frameCtx.drawImage(videoFeedEl, 0, 0, frameCanvas.width, frameCanvas.height);
-
-                const detectorOptions = activeMode === "ssd"
-                    ? SSD_DETECTOR_OPTIONS
-                    : TINY_DETECTOR_OPTIONS;
-                const useTinyLandmarks = activeMode !== "ssd";
-
-                const detections = showLandmarks
-                    ? await faceapi
-                        .detectAllFaces(frameCanvas, detectorOptions)
-                        .withFaceLandmarks(useTinyLandmarks)
-                    : await faceapi.detectAllFaces(frameCanvas, detectorOptions);
-
-                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-
-                if (detections.length === 0) {
-                    tracker.reset();
-                    window.latestFacePredictions = [];
-                    if (readoutSource === "live") {
-                        readoutRenderer.render([]);
-                    }
-                    canvasHasDrawing = false;
-                } else {
-                    const needAttributeRefresh =
-                        !tracker.hasAllAttributes(detections) ||
-                        now - lastAttributeTime >= ATTRIBUTE_REFRESH_MS;
-
-                    let attributes;
-                    if (needAttributeRefresh) {
-                        const regions = detections.map((d) => d.alignedRect || d.detection || d);
-                        const faceCanvases = await faceapi.extractFaces(frameCanvas, regions);
-                        const [ageGenderList, expressionsList] = await Promise.all([
-                            Promise.all(
-                                faceCanvases.map((c) => faceapi.nets.ageGenderNet.predictAgeAndGender(c))
-                            ),
-                            Promise.all(
-                                faceCanvases.map((c) => faceapi.nets.faceExpressionNet.predictExpressions(c))
-                            ),
-                        ]);
-                        attributes = tracker.updateWithFreshAttributes(
-                            detections,
-                            ageGenderList,
-                            expressionsList
-                        );
-                        lastAttributeTime = now;
-                    } else {
-                        attributes = tracker.attachCachedAttributes(detections);
-                    }
-
-                    const displaySize = { width: canvas.width, height: canvas.height };
-                    const resizedDetections = faceapi.resizeResults(detections, displaySize);
-
-                    drawPrecisionOverlay(canvasCtx, resizedDetections, attributes, showLandmarks);
-                    canvasHasDrawing = true;
-
-                    const validAttributes = attributes.filter(Boolean);
-                    const predictions = formatFacePredictions(validAttributes);
-                    window.latestFacePredictions = predictions;
-                    if (readoutSource === "live") {
-                        readoutRenderer.render(predictions);
-                    }
-
-                    if (
-                        window.introCompleted &&
-                        !screenshotFrame.classList.contains("has-capture")
-                    ) {
-                        window.captureSnapshot({ scan: true });
-                    }
-                }
-
-                const tickLatency = performance.now() - tickStart;
-                emaLatencyMs = emaLatencyMs
-                    ? emaLatencyMs * 0.8 + tickLatency * 0.2
-                    : tickLatency;
-                if (perfStatsEl) {
-                    const effectiveFps = Math.min(
-                        Math.round(1000 / Math.max(emaLatencyMs, TARGET_FRAME_INTERVAL_MS)),
-                        60
+                let attributes;
+                if (needAttributeRefresh) {
+                    const regions = detections.map((d) => d.alignedRect || d.detection || d);
+                    const faceCanvases = await faceapi.extractFaces(frameCanvas, regions);
+                    const [ageGenderList, expressionsList] = await Promise.all([
+                        Promise.all(
+                            faceCanvases.map((c) => faceapi.nets.ageGenderNet.predictAgeAndGender(c))
+                        ),
+                        Promise.all(
+                            faceCanvases.map((c) => faceapi.nets.faceExpressionNet.predictExpressions(c))
+                        ),
+                    ]);
+                    attributes = tracker.updateWithFreshAttributes(
+                        detections,
+                        ageGenderList,
+                        expressionsList
                     );
-                    const label = activeMode === "ssd" ? "SSD" : "Tiny";
-                    const lmLabel = showLandmarks ? "LM:On" : "LM:Off";
-                    perfStatsEl.textContent = `${label} · ${lmLabel} · ~${effectiveFps} FPS · ${Math.round(emaLatencyMs)} ms`;
+                    lastAttributeTime = now;
+                } else {
+                    attributes = tracker.attachCachedAttributes(detections);
                 }
-            } finally {
-                isDetecting = false;
-            }
-        };
 
+                const displaySize = { width: canvas.width, height: canvas.height };
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+
+                drawPrecisionOverlay(canvasCtx, resizedDetections, attributes, showLandmarks);
+                canvasHasDrawing = true;
+
+                const validAttributes = attributes.filter(Boolean);
+                const predictions = formatFacePredictions(validAttributes);
+                window.latestFacePredictions = predictions;
+                if (readoutSource === "live") {
+                    readoutRenderer.render(predictions);
+                }
+
+                if (
+                    window.introCompleted &&
+                    !screenshotFrame.classList.contains("has-capture")
+                ) {
+                    window.captureSnapshot({ scan: true });
+                }
+            }
+
+            const tickLatency = performance.now() - tickStart;
+            emaLatencyMs = emaLatencyMs
+                ? emaLatencyMs * 0.8 + tickLatency * 0.2
+                : tickLatency;
+            if (perfStatsEl) {
+                const effectiveFps = Math.min(
+                    Math.round(1000 / Math.max(emaLatencyMs, TARGET_FRAME_INTERVAL_MS)),
+                    60
+                );
+                const label = activeMode === "ssd" ? "SSD" : "Tiny";
+                const lmLabel = showLandmarks ? "LM:On" : "LM:Off";
+                perfStatsEl.textContent = `${label} · ${lmLabel} · ~${effectiveFps} FPS · ${Math.round(emaLatencyMs)} ms`;
+            }
+        } finally {
+            isDetecting = false;
+        }
+    };
+
+    const startDetectionLoop = () => {
+        if (loopStarted) return;
+        loopStarted = true;
         const loop = (now) => {
             runInferenceTick(now);
             requestAnimationFrame(loop);
         };
-
         requestAnimationFrame(loop);
-    } catch (error) {
-        cameraPermissionGranted = false;
-        setStatusIndicator("error", "Camera Blocked");
-        const perfStats = document.getElementById("perf-stats");
-        if (perfStats) perfStats.textContent = "Camera unavailable";
-        const introBtn = document.getElementById("intro-toggle-btn");
-        if (introBtn) introBtn.disabled = true;
-        document.getElementById("container").style.display = "none";
-        document.getElementById("no-permission-message").style.display = "block";
-        console.error("Camera permission denied or initialization failed: ", error);
-    }
-};
+    };
 
-document.addEventListener("DOMContentLoaded", () => {
-    const retryBtn = document.getElementById("retry-camera-btn");
+    const run = async () => {
+        try {
+            await window.cameraReadyPromise;
+            syncCanvasResolution();
+
+            if (perfStatsEl) {
+                perfStatsEl.textContent = "Loading TinyFace (~1.05 MB)...";
+            }
+            await ensureModelsLoaded(activeMode);
+            setStatusIndicator("live", "Live");
+            startDetectionLoop();
+        } catch (error) {
+            cameraPermissionGranted = false;
+            setStatusIndicator("error", "Camera Blocked");
+            if (perfStatsEl) perfStatsEl.textContent = "Camera unavailable";
+            const introBtn = document.getElementById("intro-toggle-btn");
+            if (introBtn) introBtn.disabled = true;
+            workspace.style.display = "none";
+            document.getElementById("no-permission-message").style.display = "block";
+            console.error("Camera permission denied or initialization failed: ", error);
+        }
+    };
+
     if (retryBtn) {
         retryBtn.addEventListener("click", () => {
             setStatusIndicator("loading", "Retrying");
@@ -801,6 +971,6 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     }
-});
 
-run();
+    run();
+});

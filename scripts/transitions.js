@@ -98,6 +98,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         setBlackout(false);
         hackVideo.pause();
         hackVideo.style.display = "none";
+        if (hackVideo.hasAttribute("src")) {
+            hackVideo.removeAttribute("src");
+            hackVideo.load();
+        }
         webVideo.style.display = "block";
         if (typeof window.setRecognitionPaused === "function") {
             window.setRecognitionPaused(false);
