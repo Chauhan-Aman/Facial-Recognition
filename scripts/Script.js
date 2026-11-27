@@ -3,9 +3,19 @@ window.latestFacePredictions = [];
 window.recognitionPaused = false;
 
 const MODEL_URI = "./models";
-const TARGET_FRAME_INTERVAL_MS = 50; // ~20 FPS cap to preserve GPU/CPU headroom
+const TARGET_FRAME_INTERVAL_MS = 50; // ~20 FPS cap for responsive tracking with low overhead
 const ATTRIBUTE_REFRESH_MS = 450;    // Decoupled age/gender/expression cadence
 const SMOOTHING_ALPHA = 0.25;        // EMA factor for temporal attribute stability
+const EXPRESSION_ORDER = [
+    "happy",
+    "neutral",
+    "surprised",
+    "sad",
+    "angry",
+    "fearful",
+    "disgusted",
+];
+
 const TINY_DETECTOR_OPTIONS = new faceapi.TinyFaceDetectorOptions({
     inputSize: 320,
     scoreThreshold: 0.5,
@@ -14,30 +24,36 @@ const SSD_DETECTOR_OPTIONS = new faceapi.SsdMobilenetv1Options({
     minConfidence: 0.5,
 });
 
+const getDetectionBox = (det) => (det.detection ? det.detection.box : det.box);
+
 /**
  * Formats smoothed face predictions into structured objects for UI rendering.
  */
 const formatFacePredictions = (faces) =>
     faces.map((face, index) => {
         const { age, gender, genderProbability, expressions } = face;
-        const emotions = expressions
+        const sortedExpressions = expressions
             ? Object.entries(expressions)
-                .filter(([_, confidence]) => Math.round(confidence * 100) > 0)
-                .sort(([, a], [, b]) => b - a)
-                .map(([emotion, confidence]) => `${emotion}: ${Math.round(confidence * 100)}%`)
+                .map(([emotion, score]) => ({ emotion, score }))
+                .sort((a, b) => b.score - a.score)
             : [];
+
+        const emotions = sortedExpressions
+            .filter((item) => Math.round(item.score * 100) > 0)
+            .map((item) => `${item.emotion}: ${Math.round(item.score * 100)}%`);
 
         return {
             faceIndex: index + 1,
             gender: gender || "unknown",
             genderConfidence: genderProbability ? Math.round(genderProbability * 100) : 0,
             age: Number.isFinite(age) ? Math.round(age) : 0,
+            expressions: sortedExpressions,
             emotions,
         };
     });
 
 /**
- * Loads only the models needed for the active detector mode.
+ * Loads only the models required for the active detector mode.
  * Tiny mode loads ~1.05 MB total; SSD mode lazy-loads ~6.0 MB on demand.
  */
 const ensureModelsLoaded = async (mode) => {
@@ -70,8 +86,6 @@ const ensureModelsLoaded = async (mode) => {
         await Promise.all(loaders);
     }
 };
-
-const getDetectionBox = (det) => (det.detection ? det.detection.box : det.box);
 
 /**
  * Smooths age, gender probability, and expression scores over time using EMA
@@ -117,8 +131,7 @@ const createAttributeTracker = () => {
 
     return {
         hasAllAttributes: (detections) => {
-            if (detections.length === 0) return false;
-            if (detections.length !== tracks.length) return false;
+            if (detections.length === 0 || detections.length !== tracks.length) return false;
             const used = new Set();
             return detections.every((det) => {
                 const idx = findMatchingTrack(getDetectionBox(det), used);
@@ -162,9 +175,7 @@ const createAttributeTracker = () => {
             const enriched = detections.map((det) => {
                 const box = getDetectionBox(det);
                 const matchIdx = findMatchingTrack(box, used);
-                if (matchIdx === -1) {
-                    return null;
-                }
+                if (matchIdx === -1) return null;
                 used.add(matchIdx);
                 const track = tracks[matchIdx];
                 nextTracks.push({ ...track, box });
@@ -181,8 +192,226 @@ const createAttributeTracker = () => {
 };
 
 /**
- * Requests camera permission once and exposes the shared promise so transition
- * scripts reuse the active stream instead of opening a duplicate camera handle.
+ * Draws crisp precision overlays and batched landmark points directly on Canvas2D,
+ * avoiding per-frame faceapi DrawTextField/arc overhead.
+ */
+const drawPrecisionOverlay = (ctx, detections, attributes, showLandmarks) => {
+    const canvasWidth = ctx.canvas.width;
+
+    detections.forEach((det, idx) => {
+        const box = getDetectionBox(det);
+        const attr = attributes[idx];
+        const x = Math.round(box.x);
+        const y = Math.round(box.y);
+        const w = Math.round(box.width);
+        const h = Math.round(box.height);
+        const corner = Math.max(10, Math.min(20, Math.round(Math.min(w, h) * 0.16)));
+
+        ctx.strokeStyle = "rgba(52, 211, 153, 0.38)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+
+        ctx.strokeStyle = "#34d399";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y + corner);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x + corner, y);
+        ctx.moveTo(x + w - corner, y);
+        ctx.lineTo(x + w, y);
+        ctx.lineTo(x + w, y + corner);
+        ctx.moveTo(x + w, y + h - corner);
+        ctx.lineTo(x + w, y + h);
+        ctx.lineTo(x + w - corner, y + h);
+        ctx.moveTo(x + corner, y + h);
+        ctx.lineTo(x, y + h);
+        ctx.lineTo(x, y + h - corner);
+        ctx.stroke();
+
+        if (showLandmarks && det.landmarks && det.landmarks.positions) {
+            ctx.fillStyle = "rgba(238, 242, 246, 0.78)";
+            ctx.beginPath();
+            const pts = det.landmarks.positions;
+            for (let i = 0; i < pts.length; i++) {
+                const px = pts[i].x;
+                const py = pts[i].y;
+                ctx.moveTo(px + 1.4, py);
+                ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+            }
+            ctx.fill();
+        }
+
+        if (attr) {
+            let topEmotion = "";
+            let topScore = -1;
+            for (const [emotion, score] of Object.entries(attr.expressions || {})) {
+                if (score > topScore) {
+                    topScore = score;
+                    topEmotion = emotion;
+                }
+            }
+            const conf = Math.round(attr.genderProbability * 100);
+            const age = Math.round(attr.age);
+            const label = topEmotion
+                ? `${attr.gender} ${conf}% · ${age}y · ${topEmotion} ${Math.round(topScore * 100)}%`
+                : `${attr.gender} ${conf}% · ${age}y`;
+
+            ctx.font = '600 12px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+            const textMetrics = ctx.measureText(label);
+            const padX = 8;
+            const badgeW = Math.ceil(textMetrics.width) + padX * 2;
+            const badgeH = 22;
+            const badgeX = Math.max(4, Math.min(x, canvasWidth - badgeW - 4));
+            const badgeY = y - badgeH - 6 >= 4 ? y - badgeH - 6 : y + 6;
+
+            ctx.fillStyle = "rgba(10, 12, 15, 0.86)";
+            ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+            ctx.fillStyle = "#34d399";
+            ctx.fillRect(badgeX, badgeY, 2, badgeH);
+            ctx.fillStyle = "#eef2f6";
+            ctx.textBaseline = "middle";
+            ctx.fillText(label, badgeX + padX, badgeY + badgeH * 0.5);
+        }
+    });
+};
+
+/**
+ * Reuses a fixed pool of DOM rows for the Subject Readout inspector so live
+ * expression bars update smoothly without DOM churn.
+ */
+const createReadoutRenderer = () => {
+    const emptyEl = document.getElementById("readout-empty");
+    const metricsEl = document.getElementById("readout-metrics");
+    const faceTabsEl = document.getElementById("face-tabs");
+    const ageEl = document.getElementById("metric-age");
+    const genderEl = document.getElementById("metric-gender");
+    const genderConfEl = document.getElementById("metric-gender-conf");
+    const facesEl = document.getElementById("metric-faces");
+    const topEmotionEl = document.getElementById("top-emotion-label");
+    const listEl = document.getElementById("expressions-list");
+    const predictiveResultsEl = document.getElementById("predictive-results");
+
+    let selectedFaceIdx = 0;
+    let lastPredictions = [];
+    let lastOrderKey = "";
+    const rowsByEmotion = new Map();
+
+    EXPRESSION_ORDER.forEach((emotion) => {
+        const row = document.createElement("div");
+        row.className = "expr-row";
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "expr-name";
+        nameEl.textContent = emotion;
+
+        const trackEl = document.createElement("div");
+        trackEl.className = "expr-track";
+
+        const fillEl = document.createElement("div");
+        fillEl.className = "expr-fill";
+        trackEl.appendChild(fillEl);
+
+        const pctEl = document.createElement("span");
+        pctEl.className = "expr-pct";
+        pctEl.textContent = "0%";
+
+        row.append(nameEl, trackEl, pctEl);
+        listEl.appendChild(row);
+        rowsByEmotion.set(emotion, { row, nameEl, fillEl, pctEl });
+    });
+
+    const renderFaceTabs = (count) => {
+        if (count <= 1) {
+            faceTabsEl.hidden = true;
+            selectedFaceIdx = 0;
+            return;
+        }
+        faceTabsEl.hidden = false;
+        if (selectedFaceIdx >= count) selectedFaceIdx = 0;
+
+        if (faceTabsEl.childElementCount !== count) {
+            faceTabsEl.textContent = "";
+            for (let i = 0; i < count; i++) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "face-tab";
+                btn.textContent = `Face ${i + 1}`;
+                btn.addEventListener("click", () => {
+                    selectedFaceIdx = i;
+                    render(lastPredictions);
+                });
+                faceTabsEl.appendChild(btn);
+            }
+        }
+
+        Array.from(faceTabsEl.children).forEach((btn, idx) => {
+            btn.classList.toggle("is-active", idx === selectedFaceIdx);
+        });
+    };
+
+    const render = (predictions, emptyMessage = null) => {
+        lastPredictions = predictions;
+        predictiveResultsEl.textContent = JSON.stringify(predictions);
+
+        if (!predictions || predictions.length === 0) {
+            faceTabsEl.hidden = true;
+            emptyEl.textContent = emptyMessage ||
+                "Position a face in the frame to stream live age, gender, and expression estimates.";
+            emptyEl.hidden = false;
+            metricsEl.hidden = true;
+            return;
+        }
+
+        renderFaceTabs(predictions.length);
+        const face = predictions[selectedFaceIdx] || predictions[0];
+        emptyEl.hidden = true;
+        metricsEl.hidden = false;
+
+        ageEl.textContent = `${face.age}y`;
+        genderEl.textContent = face.gender;
+        genderConfEl.textContent = `${face.genderConfidence}% conf`;
+        facesEl.textContent = String(predictions.length);
+
+        const sorted = face.expressions || [];
+        const dominant = sorted[0];
+        topEmotionEl.textContent = dominant
+            ? `${dominant.emotion} · ${Math.round(dominant.score * 100)}%`
+            : "--";
+
+        const orderKey = sorted.map((item) => item.emotion).join(",");
+        const orderChanged = orderKey !== lastOrderKey;
+        lastOrderKey = orderKey;
+
+        sorted.forEach((item, rank) => {
+            const entry = rowsByEmotion.get(item.emotion);
+            if (!entry) return;
+            const pct = Math.round(item.score * 100);
+            const scale = Math.max(0, Math.min(1, item.score));
+            entry.row.classList.toggle("is-dominant", rank === 0);
+            entry.fillEl.style.transform = `scaleX(${scale.toFixed(3)})`;
+            entry.pctEl.textContent = `${pct}%`;
+            if (orderChanged) {
+                listEl.appendChild(entry.row);
+            }
+        });
+    };
+
+    return { render };
+};
+
+const setStatusIndicator = (state, badgeText) => {
+    const dot = document.getElementById("camera-dot");
+    const badge = document.getElementById("status-badge");
+    if (dot) {
+        dot.className = `status-dot is-${state}`;
+    }
+    if (badge && badgeText) {
+        badge.textContent = badgeText;
+    }
+};
+
+/**
+ * Requests camera permission once and exposes a shared promise + retry capability.
  */
 const initCamera = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -195,12 +424,11 @@ const initCamera = async () => {
     });
 
     cameraPermissionGranted = true;
-    document.querySelectorAll("canvas, .typewriter").forEach((el) => {
-        el.style.display = "block";
-    });
-    document.getElementById("container").style.display = "flex";
+    document.getElementById("container").style.display = "grid";
     document.getElementById("controls-bar").style.display = "flex";
     document.getElementById("no-permission-message").style.display = "none";
+    const introBtn = document.getElementById("intro-toggle-btn");
+    if (introBtn) introBtn.disabled = false;
 
     const videoFeedEl = document.getElementById("video-feed");
     videoFeedEl.srcObject = stream;
@@ -212,6 +440,18 @@ const initCamera = async () => {
         videoFeedEl.addEventListener("loadedmetadata", resolve, { once: true });
     });
 
+    const vw = videoFeedEl.videoWidth || 720;
+    const vh = videoFeedEl.videoHeight || 480;
+    const aspect = `${vw} / ${vh}`;
+    const feedStage = document.getElementById("feed-stage");
+    const screenshotContainer = document.getElementById("screenshot-container");
+    if (feedStage) feedStage.style.aspectRatio = aspect;
+    if (screenshotContainer) screenshotContainer.style.aspectRatio = aspect;
+
+    const placeholder = document.getElementById("camera-placeholder");
+    if (placeholder) placeholder.classList.add("is-hidden");
+
+    setStatusIndicator("loading", "Loading Models");
     return { stream, videoFeedEl };
 };
 
@@ -221,49 +461,160 @@ const run = async () => {
     try {
         const { videoFeedEl } = await window.cameraReadyPromise;
 
-        // Cached DOM & canvas references
         const canvas = document.getElementById("canvas");
         const canvasCtx = canvas.getContext("2d");
         const img = document.getElementById("screenshot");
+        const screenshotFrame = document.getElementById("screenshot-container");
+        const captureMetaEl = document.getElementById("capture-meta");
+        const retakeBtn = document.getElementById("retake-btn");
+        const sourceLiveBtn = document.getElementById("source-live-btn");
+        const sourceSnapBtn = document.getElementById("source-snap-btn");
         const canvasimg = document.getElementById("canvasimg");
         const screenshotCtx = canvasimg.getContext("2d");
-        const predictiveResults = document.getElementById("predictive-results");
         const detectorSelect = document.getElementById("detector-mode");
         const landmarksToggle = document.getElementById("toggle-landmarks");
         const perfStatsEl = document.getElementById("perf-stats");
 
-        // Reusable offscreen frame canvas so detection + face extraction share 1 decoded frame
+        const readoutRenderer = createReadoutRenderer();
         const frameCanvas = document.createElement("canvas");
         const frameCtx = frameCanvas.getContext("2d");
 
-        const syncCanvasLayout = () => {
-            canvas.style.left = videoFeedEl.offsetLeft + "px";
-            canvas.style.top = videoFeedEl.offsetTop + "px";
-            if (canvas.height !== videoFeedEl.height) canvas.height = videoFeedEl.height;
-            if (canvas.width !== videoFeedEl.width) canvas.width = videoFeedEl.width;
+        const syncCanvasResolution = () => {
+            const vw = videoFeedEl.videoWidth || 720;
+            const vh = videoFeedEl.videoHeight || 480;
+            if (canvas.width !== vw || canvas.height !== vh) {
+                canvas.width = vw;
+                canvas.height = vh;
+            }
+            if (frameCanvas.width !== vw || frameCanvas.height !== vh) {
+                frameCanvas.width = vw;
+                frameCanvas.height = vh;
+            }
         };
 
-        syncCanvasLayout();
-        window.addEventListener("resize", syncCanvasLayout);
-
-        canvasimg.style.left = img.offsetLeft + "px";
-        canvasimg.style.top = img.offsetTop + "px";
-        canvasimg.height = img.height;
-        canvasimg.width = img.width;
+        syncCanvasResolution();
 
         let activeMode = detectorSelect ? detectorSelect.value : "tiny";
         let showLandmarks = landmarksToggle ? landmarksToggle.checked : true;
         let isSwitchingModel = false;
+        let readoutSource = "live"; // "live" | "snapshot"
+        let snapshotPredictions = [];
+        let scanTimerId = null;
+
+        const setReadoutSource = (nextSource) => {
+            readoutSource = nextSource;
+            if (sourceLiveBtn) sourceLiveBtn.classList.toggle("is-active", nextSource === "live");
+            if (sourceSnapBtn) sourceSnapBtn.classList.toggle("is-active", nextSource === "snapshot");
+
+            if (nextSource === "snapshot") {
+                readoutRenderer.render(
+                    snapshotPredictions,
+                    "No face detected in the captured snapshot. Click Retake to capture again."
+                );
+            } else {
+                readoutRenderer.render(window.latestFacePredictions);
+            }
+        };
+
+        if (sourceLiveBtn) {
+            sourceLiveBtn.addEventListener("click", () => setReadoutSource("live"));
+        }
+        if (sourceSnapBtn) {
+            sourceSnapBtn.addEventListener("click", () => {
+                if (!sourceSnapBtn.disabled) setReadoutSource("snapshot");
+            });
+        }
+
+        const analyzeSnapshotCanvas = async (snapCanvas) => {
+            if (!faceapi.nets.ageGenderNet.isLoaded || !faceapi.nets.faceExpressionNet.isLoaded) {
+                return;
+            }
+            const detectorOptions = activeMode === "ssd"
+                ? SSD_DETECTOR_OPTIONS
+                : TINY_DETECTOR_OPTIONS;
+            const useTinyLandmarks = activeMode !== "ssd";
+
+            const dets = await faceapi
+                .detectAllFaces(snapCanvas, detectorOptions)
+                .withFaceLandmarks(useTinyLandmarks)
+                .withAgeAndGender()
+                .withFaceExpressions();
+
+            snapshotPredictions = formatFacePredictions(dets);
+            if (readoutSource === "snapshot") {
+                setReadoutSource("snapshot");
+            }
+        };
+
+        window.captureSnapshot = async ({ scan = true, switchToSnapshot = false } = {}) => {
+            if (videoFeedEl.readyState < 2) return false;
+            const vw = videoFeedEl.videoWidth || 720;
+            const vh = videoFeedEl.videoHeight || 480;
+            canvasimg.width = vw;
+            canvasimg.height = vh;
+            screenshotCtx.drawImage(videoFeedEl, 0, 0, vw, vh);
+            img.src = canvasimg.toDataURL("image/png");
+
+            img.classList.add("has-image");
+            screenshotFrame.classList.add("has-capture");
+            if (retakeBtn) retakeBtn.textContent = "Retake";
+            if (sourceSnapBtn) sourceSnapBtn.disabled = false;
+            if (captureMetaEl) {
+                captureMetaEl.hidden = false;
+                captureMetaEl.textContent = new Date().toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                });
+            }
+
+            if (scan) {
+                if (scanTimerId) clearTimeout(scanTimerId);
+                screenshotFrame.classList.add("is-scanning");
+                scanTimerId = setTimeout(() => {
+                    screenshotFrame.classList.remove("is-scanning");
+                    scanTimerId = null;
+                }, 1300);
+            }
+
+            try {
+                await analyzeSnapshotCanvas(canvasimg);
+                if (switchToSnapshot) {
+                    setReadoutSource("snapshot");
+                }
+            } finally {
+                screenshotCtx.clearRect(0, 0, vw, vh);
+            }
+            return true;
+        };
+
+        if (retakeBtn) {
+            retakeBtn.addEventListener("click", () => {
+                window.captureSnapshot({ scan: true, switchToSnapshot: true });
+            });
+        }
+
+        window.setRecognitionPaused = (paused) => {
+            window.recognitionPaused = Boolean(paused);
+            if (window.recognitionPaused) {
+                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+                setStatusIndicator("paused", "Paused");
+            } else {
+                setStatusIndicator("live", "Live");
+            }
+        };
 
         if (perfStatsEl) {
-            perfStatsEl.textContent = "Loading TinyFace models (~1.05 MB)...";
+            perfStatsEl.textContent = "Loading TinyFace (~1.05 MB)...";
         }
         await ensureModelsLoaded(activeMode);
+        setStatusIndicator("live", "Live");
 
         if (detectorSelect) {
             detectorSelect.addEventListener("change", async (event) => {
                 const nextMode = event.target.value;
                 isSwitchingModel = true;
+                setStatusIndicator("loading", "Switching");
                 if (perfStatsEl) {
                     perfStatsEl.textContent = nextMode === "ssd"
                         ? "Loading SSD MobileNet..."
@@ -272,6 +623,13 @@ const run = async () => {
                 try {
                     await ensureModelsLoaded(nextMode);
                     activeMode = nextMode;
+                    if (img.classList.contains("has-image")) {
+                        analyzeSnapshotCanvas(img).catch(() => {});
+                    }
+                    setStatusIndicator(
+                        window.recognitionPaused ? "paused" : "live",
+                        window.recognitionPaused ? "Paused" : "Live"
+                    );
                 } finally {
                     isSwitchingModel = false;
                 }
@@ -285,7 +643,6 @@ const run = async () => {
         }
 
         const tracker = createAttributeTracker();
-        let screenshotTaken = false;
         let isDetecting = false;
         let lastFrameTime = 0;
         let lastAttributeTime = 0;
@@ -324,34 +681,28 @@ const run = async () => {
             const tickStart = performance.now();
 
             try {
-                const vw = videoFeedEl.videoWidth || videoFeedEl.width;
-                const vh = videoFeedEl.videoHeight || videoFeedEl.height;
-                if (frameCanvas.width !== vw || frameCanvas.height !== vh) {
-                    frameCanvas.width = vw;
-                    frameCanvas.height = vh;
-                }
-                frameCtx.drawImage(videoFeedEl, 0, 0, vw, vh);
+                syncCanvasResolution();
+                frameCtx.drawImage(videoFeedEl, 0, 0, frameCanvas.width, frameCanvas.height);
 
                 const detectorOptions = activeMode === "ssd"
                     ? SSD_DETECTOR_OPTIONS
                     : TINY_DETECTOR_OPTIONS;
                 const useTinyLandmarks = activeMode !== "ssd";
 
-                let detections;
-                if (showLandmarks) {
-                    detections = await faceapi
+                const detections = showLandmarks
+                    ? await faceapi
                         .detectAllFaces(frameCanvas, detectorOptions)
-                        .withFaceLandmarks(useTinyLandmarks);
-                } else {
-                    detections = await faceapi.detectAllFaces(frameCanvas, detectorOptions);
-                }
+                        .withFaceLandmarks(useTinyLandmarks)
+                    : await faceapi.detectAllFaces(frameCanvas, detectorOptions);
 
                 canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
 
                 if (detections.length === 0) {
                     tracker.reset();
                     window.latestFacePredictions = [];
-                    predictiveResults.textContent = "[]";
+                    if (readoutSource === "live") {
+                        readoutRenderer.render([]);
+                    }
                     canvasHasDrawing = false;
                 } else {
                     const needAttributeRefresh =
@@ -380,46 +731,24 @@ const run = async () => {
                         attributes = tracker.attachCachedAttributes(detections);
                     }
 
-                    const displaySize = { width: videoFeedEl.width, height: videoFeedEl.height };
+                    const displaySize = { width: canvas.width, height: canvas.height };
                     const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
-                    faceapi.draw.drawDetections(canvas, resizedDetections);
-                    if (showLandmarks) {
-                        faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
-                    }
-
-                    const validAttributes = [];
-                    resizedDetections.forEach((resizedDet, idx) => {
-                        const attr = attributes[idx];
-                        if (!attr) return;
-                        validAttributes.push(attr);
-
-                        const box = getDetectionBox(resizedDet);
-                        const exprEntries = Object.entries(attr.expressions)
-                            .sort(([, a], [, b]) => b - a);
-                        const topExpr = exprEntries[0];
-                        const exprText = topExpr
-                            ? `${topExpr[0]} (${Math.round(topExpr[1] * 100)}%)`
-                            : "";
-                        const genderText = `${attr.gender} - ${Math.round(attr.genderProbability * 100)}%`;
-                        const ageText = `Age: ${Math.round(attr.age)} yrs`;
-
-                        const lines = exprText ? [genderText, ageText, exprText] : [genderText, ageText];
-                        const textField = new faceapi.draw.DrawTextField(lines, box.topRight);
-                        textField.draw(canvas);
-                    });
-
+                    drawPrecisionOverlay(canvasCtx, resizedDetections, attributes, showLandmarks);
                     canvasHasDrawing = true;
+
+                    const validAttributes = attributes.filter(Boolean);
                     const predictions = formatFacePredictions(validAttributes);
                     window.latestFacePredictions = predictions;
-                    predictiveResults.textContent = JSON.stringify(predictions);
+                    if (readoutSource === "live") {
+                        readoutRenderer.render(predictions);
+                    }
 
-                    if (!screenshotTaken) {
-                        screenshotCtx.drawImage(frameCanvas, 0, 0, canvasimg.width, canvasimg.height);
-                        img.src = canvasimg.toDataURL("image/png");
-                        screenshotCtx.clearRect(0, 0, canvasimg.width, canvasimg.height);
-                        screenshotTaken = true;
-                        canvasimg.style.display = "none";
+                    if (
+                        window.introCompleted &&
+                        !screenshotFrame.classList.contains("has-capture")
+                    ) {
+                        window.captureSnapshot({ scan: true });
                     }
                 }
 
@@ -434,7 +763,7 @@ const run = async () => {
                     );
                     const label = activeMode === "ssd" ? "SSD" : "Tiny";
                     const lmLabel = showLandmarks ? "LM:On" : "LM:Off";
-                    perfStatsEl.textContent = `${label} | ${lmLabel} | ~${effectiveFps} FPS | ${Math.round(emaLatencyMs)} ms | Faces: ${detections.length}`;
+                    perfStatsEl.textContent = `${label} · ${lmLabel} · ~${effectiveFps} FPS · ${Math.round(emaLatencyMs)} ms`;
                 }
             } finally {
                 isDetecting = false;
@@ -449,12 +778,29 @@ const run = async () => {
         requestAnimationFrame(loop);
     } catch (error) {
         cameraPermissionGranted = false;
-        document.querySelectorAll("#container, #controls-bar, canvas, .typewriter").forEach((el) => {
-            el.style.display = "none";
-        });
+        setStatusIndicator("error", "Camera Blocked");
+        const perfStats = document.getElementById("perf-stats");
+        if (perfStats) perfStats.textContent = "Camera unavailable";
+        const introBtn = document.getElementById("intro-toggle-btn");
+        if (introBtn) introBtn.disabled = true;
+        document.getElementById("container").style.display = "none";
         document.getElementById("no-permission-message").style.display = "block";
         console.error("Camera permission denied or initialization failed: ", error);
     }
 };
+
+document.addEventListener("DOMContentLoaded", () => {
+    const retryBtn = document.getElementById("retry-camera-btn");
+    if (retryBtn) {
+        retryBtn.addEventListener("click", () => {
+            setStatusIndicator("loading", "Retrying");
+            window.cameraReadyPromise = initCamera();
+            run();
+            if (typeof window.startIntroSequence === "function") {
+                window.startIntroSequence();
+            }
+        });
+    }
+});
 
 run();

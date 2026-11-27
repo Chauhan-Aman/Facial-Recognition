@@ -52,10 +52,10 @@ This document captures the current bottlenecks, bugs, and optimization plan for 
 - [x] **Cache Canvas Contexts & DOM References**
   - **Current:** `canvas.getContext("2d")` and `document.getElementById('predictive-results')` are queried inside the detection loop every tick (`scripts/Script.js:61, 81`), and `new faceapi.draw.DrawTextField(...)` is instantiated per face per tick.
   - **Fix:** Cache `canvasCtx`, `screenshotCtx`, and all DOM element references once during setup.
-- [ ] **Sync `#screenshot` capture with the countdown**
+- [x] **Sync `#screenshot` capture with the countdown**
   - **Current:** `scripts/Script.js:85-91` captures `#screenshot` on the very first detection frame—long before the `"3... 2... 1... Smile!"` prompt in `scripts/transitions.js`.
   - **Fix:** Trigger screenshot capture at the exact `"Smile!"` moment (and allow re-capturing with a button).
-- [ ] **Responsive Canvas Alignment**
+- [x] **Responsive Canvas Alignment**
   - **Current:** `canvas.style.left` / `top` are set using `offsetLeft` / `offsetTop` at startup and manually offset during `performFinalTransition()`.
   - **Fix:** Wrap `<video>` and `<canvas>` in a `position: relative` container so the overlay canvas automatically stays aligned on resize and CSS transitions.
 - [ ] **Asset Cleanup / Lazy Loading**
@@ -66,14 +66,14 @@ This document captures the current bottlenecks, bugs, and optimization plan for 
 
 ## 4. Architecture & UX Improvements
 
-- [ ] **Replace nested `setTimeout` pyramid in `scripts/transitions.js`**
+- [x] **Replace nested `setTimeout` pyramid in `scripts/transitions.js`**
   - **Current:** Deeply nested timeouts (`13500` -> `100` -> `4500` -> `14500` -> `15000` ms + `10000` ms scan) block live results for ~40+ seconds with no cancellation mechanism.
   - **Fix:** Refactor into clean `async`/`await` steps with an `AbortController` so the timeline can be cancelled or skipped cleanly.
-- [ ] **Add "Skip Intro" / "Instant Analysis" Mode**
+- [x] **Add "Skip Intro" / "Instant Analysis" Mode**
   - Let users jump straight to real-time detection + live predictive readout instead of waiting ~40 seconds on repeat visits.
 - [ ] **Remove or archive unused legacy scripts**
   - `scripts/PredictionsScript.js`, `scripts/newtyping.js`, and `scripts/typingtrials.js` are commented out in `index.html` and superseded by `Script.js` and `transitions.js`.
-- [ ] **Add live performance & confidence telemetry**
+- [x] **Add live performance & confidence telemetry**
   - Optionally show real-time FPS / inference latency (ms), smoothed age/gender/emotion bars, and a clean "Retake / Switch Camera / Upload Image" control bar.
 
 ---

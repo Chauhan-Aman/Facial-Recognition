@@ -1,219 +1,222 @@
-window.addEventListener("load", async () => {
-    try {
-        await window.cameraReadyPromise;
-        console.log("Camera permission granted (shared stream).");
+window.addEventListener("DOMContentLoaded", async () => {
+    const hackVideo = document.getElementById("hack-video");
+    const webVideo = document.getElementById("video-feed");
+    const workspace = document.getElementById("container");
+    const inspector = document.getElementById("analyze-results");
+    const statusPrimary = document.getElementById("status-primary");
+    const statusSecondary = document.getElementById("status-secondary");
+    const introToggleBtn = document.getElementById("intro-toggle-btn");
+    const screenshotFrame = document.getElementById("screenshot-container");
+    const countdownHud = document.getElementById("countdown-hud");
 
-        const line1 = document.querySelector(".line1");
-        const line2 = document.querySelector(".line2");
-        const line3 = document.querySelector(".line3");
-        const HackVideo = document.getElementById("hack-video");
-        const WebVideo = document.getElementById("video-feed");
-        const ScreenshotDiv = document.getElementById("anaylzeResults");
-        const canvas = document.getElementById("canvas");
+    let activeAbort = null;
+    window.introCompleted = false;
 
-        const updateLine = (line, text, delay, additionalClasses = []) => {
-            setTimeout(() => {
-                line.style.display = "block";
-                line.style.visibility = "visible";
-                line.textContent = text;
-                line.className = "boxdims";
-                line.classList.add("typinganimation", "z-index-999", ...additionalClasses);
-            }, delay);
-        };
-
-        // Helper function for creating effects
-        const createEffect = (className, delay, removeAfter = null) => {
-            setTimeout(() => {
-                const effectDiv = document.createElement("div");
-                effectDiv.classList.add(className);
-                document.body.appendChild(effectDiv);
-
-                if (removeAfter) {
-                    setTimeout(() => effectDiv.remove(), removeAfter);
-                }
-            }, delay);
-        };
-
-        const buildPredictionLines = (predictions) => {
-            if (!predictions || predictions.length === 0) {
-                return ["Predictive Analysis:", "", "No face detected. Please stay centered in the frame."];
+    const wait = (ms, signal) =>
+        new Promise((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(new DOMException("Aborted", "AbortError"));
+                return;
             }
-
-            const lines = ["Predictive Analysis:", ""];
-            predictions.forEach((face, idx) => {
-                if (predictions.length > 1) {
-                    lines.push(`Face #${face.faceIndex}:`);
-                }
-                lines.push(`Gender: ${face.gender} (${face.genderConfidence}% Confidence)`);
-                lines.push(`Age: ${face.age} years`);
-                lines.push(`Emotions: ${face.emotions.length ? face.emotions.join(", ") : "N/A"}`);
-                if (idx < predictions.length - 1) {
-                    lines.push("");
-                }
-            });
-            return lines;
-        };
-
-        const displayPredictiveResults = () => {
-            const results = document.getElementById("anaylzeResults");
-            results.querySelectorAll(".line").forEach((node) => node.remove());
-
-            const lines = buildPredictionLines(window.latestFacePredictions);
-            let lineIndex = 0;
-            let charIndex = 0;
-
-            const typeLine = () => {
-                if (lineIndex >= lines.length) {
-                    return;
-                }
-
-                const lineText = lines[lineIndex];
-                let lineElement = document.querySelector(`#line-${lineIndex}`);
-                if (!lineElement) {
-                    lineElement = document.createElement("div");
-                    lineElement.id = `line-${lineIndex}`;
-                    lineElement.className = "line";
-                    if (lineText === "") {
-                        lineElement.style.height = "1em";
-                    }
-                    results.appendChild(lineElement);
-                }
-
-                if (lineText !== "") {
-                    lineElement.textContent += lineText[charIndex];
-                    charIndex++;
-
-                    if (charIndex < lineText.length) {
-                        setTimeout(typeLine, 50);
-                    } else {
-                        charIndex = 0;
-                        lineIndex++;
-                        setTimeout(typeLine, 300);
-                    }
-                } else {
-                    lineIndex++;
-                    setTimeout(typeLine, 300);
-                }
+            const timer = setTimeout(() => {
+                signal?.removeEventListener("abort", onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
             };
+            signal?.addEventListener("abort", onAbort, { once: true });
+        });
 
-            typeLine();
-        };
+    /**
+     * Smoothly updates status captions using GPU-composited opacity/transform transitions.
+     */
+    const setStatus = (primary, secondary = "", variant = "") => {
+        statusPrimary.classList.remove("is-visible", "is-terminal", "is-accent");
+        statusSecondary.classList.remove("is-visible");
+        void statusPrimary.offsetWidth;
 
-        const startEnhancedScanningEffect = () => {
-            const screenshotContainer = document.getElementById("screenshot-container");
-            const overlay = document.querySelector(".scanning-overlay");
-            const bar = document.querySelector(".scanning-bar");
+        statusPrimary.textContent = primary;
+        if (variant === "terminal") statusPrimary.classList.add("is-terminal");
+        if (variant === "accent") statusPrimary.classList.add("is-accent");
+        statusPrimary.classList.add("is-visible");
 
-            screenshotContainer.style.display = "block";
-            overlay.style.opacity = "1";
-            bar.style.opacity = "1";
+        if (secondary) {
+            statusSecondary.textContent = secondary;
+            statusSecondary.classList.add("is-visible");
+        } else {
+            statusSecondary.textContent = "";
+        }
+    };
 
-            setTimeout(() => {
-                overlay.style.opacity = "0";
-                bar.style.opacity = "0";
-                displayPredictiveResults();
-                updateLine(line1, "The predictive results are approximate and may vary.", 11000);
-                updateLine(line2, "Please consider them as indicative rather than definitive.", 16000);
-            }, 10000);
-        };
+    const setHud = (text) => {
+        if (!countdownHud) return;
+        if (!text) {
+            countdownHud.hidden = true;
+            countdownHud.textContent = "";
+            return;
+        }
+        countdownHud.textContent = text;
+        countdownHud.hidden = false;
+    };
 
-        const performFinalTransition = () => {
-            WebVideo.style.display = "block";
-            WebVideo.style.opacity = 0;
-            ScreenshotDiv.classList.add("is-visible");
-            ScreenshotDiv.style.opacity = 0;
+    const triggerShutterFlash = () => {
+        const flash = document.createElement("div");
+        flash.className = "blink";
+        document.body.appendChild(flash);
+        setTimeout(() => flash.remove(), 450);
+    };
 
-            setTimeout(() => {
-                WebVideo.style.transition = "opacity 0s ease-in";
-                WebVideo.style.opacity = 1;
+    const setBlackout = (enabled) => {
+        document.querySelectorAll(".blackout").forEach((el) => el.remove());
+        if (!enabled) return;
+        const overlay = document.createElement("div");
+        overlay.className = "blackout";
+        document.body.appendChild(overlay);
+        requestAnimationFrame(() => overlay.classList.add("is-active"));
+    };
 
-                setTimeout(() => {
-                    WebVideo.style.transition = "transform 1.2s ease-in-out";
-                    ScreenshotDiv.style.transition = "transform 0.8s ease-in-out, opacity 1s ease-in";
+    const openInspector = ({ triggerScan = true } = {}) => {
+        workspace.classList.add("has-inspector");
+        inspector.classList.add("is-visible");
+        requestAnimationFrame(() => {
+            inspector.classList.add("is-entered");
+        });
 
-                    WebVideo.style.transform = "translateX(-15%)";
-                    ScreenshotDiv.classList.add("analyzeTransition");
-                    ScreenshotDiv.style.transform = "translateX(30%)";
-                    ScreenshotDiv.classList.remove("analyzeTransition");
-                    ScreenshotDiv.style.opacity = 1;
+        const hasCapture = screenshotFrame.classList.contains("has-capture");
+        if (!hasCapture && typeof window.captureSnapshot === "function") {
+            window.captureSnapshot({ scan: triggerScan });
+        } else if (triggerScan) {
+            screenshotFrame.classList.add("is-scanning");
+            setTimeout(() => screenshotFrame.classList.remove("is-scanning"), 1300);
+        }
+    };
 
-                    canvas.style.left = WebVideo.offsetLeft + "px";
-                    canvas.style.top = WebVideo.offsetTop + "px";
-                    canvas.style.transform = "translateX(-15%)";
-                    canvas.height = WebVideo.height;
-                    canvas.width = WebVideo.width;
-                    setTimeout(() => {
-                        canvas.classList.add("z-index-999");
-                        canvas.style.position = "absolute";
-                        canvas.style.display = "block";
-                    }, 3000);
-                }, 1000);
-                startEnhancedScanningEffect();
-            }, 500);
-        };
+    const cleanupVisualEffects = () => {
+        setHud("");
+        setBlackout(false);
+        hackVideo.pause();
+        hackVideo.style.display = "none";
+        webVideo.style.display = "block";
+        if (typeof window.setRecognitionPaused === "function") {
+            window.setRecognitionPaused(false);
+        }
+    };
 
-        // Sequence execution
-        setTimeout(() => {
-            [line1, line2, line3].forEach((line) => (line.style.display = "none"));
+    const finishToLiveMode = ({ triggerScan = true } = {}) => {
+        window.introCompleted = true;
+        cleanupVisualEffects();
+        openInspector({ triggerScan });
+        setStatus(
+            "Live biometric tracking active.",
+            "Toggle Live / Snapshot in the readout panel, or click Retake anytime.",
+            "accent"
+        );
+        if (introToggleBtn) {
+            introToggleBtn.textContent = "Replay Intro";
+        }
+    };
 
-            line2.textContent = "3... 2... 1... Smile!";
-            line2.style.visibility = "hidden";
+    const runIntroSequence = async () => {
+        if (activeAbort) activeAbort.abort();
+        activeAbort = new AbortController();
+        const { signal } = activeAbort;
 
-            setTimeout(() => {
-                line2.style.display = "block";
-                line2.style.visibility = "visible";
-                line2.classList.add("typinganimation");
+        window.introCompleted = false;
+        if (introToggleBtn) {
+            introToggleBtn.textContent = "Skip Intro";
+        }
 
-                createEffect("blink", 3500, 1000);
-                createEffect("blackout", 4500);
+        // Collapse inspector while intro runs so camera stage takes center focus
+        inspector.classList.remove("is-entered", "is-visible");
+        workspace.classList.remove("has-inspector");
 
-                setTimeout(() => {
-                    window.recognitionPaused = true;
-                    WebVideo.style.display = "none";
-                    canvas.style.display = "none";
-                    HackVideo.src = "./images/hack-video.mp4";
-                    HackVideo.style.display = "block";
-                    HackVideo.classList.add("z-index-999");
+        try {
+            await window.cameraReadyPromise;
 
-                    updateLine(line1, "System override initiated...", 0);
-                    updateLine(line2, "Firewall breached. Accessing secured data...", 3500);
-                    updateLine(line3, "Injecting scripts to escalate privileges...", 8500);
+            setStatus(
+                "Camera ready — center your face in the frame.",
+                "Click Skip Intro or press Esc anytime to jump straight to live analysis."
+            );
+            await wait(2200, signal);
 
-                    setTimeout(() => {
-                        [line1, line3].forEach((line) => {
-                            line.style.visibility = "hidden";
-                            line.style.display = "none";
-                        });
-                        line2.textContent = "Just kidding! No hack here—stay still for the recognition process...";
-                        line2.className = "boxdims";
-                        setTimeout(() => {
-                            line2.classList.add("typinganimation", "z-index-999");
-                        }, 3000);
-                        updateLine(line3, "Completed...", 10000);
+            setStatus("Capturing reference portrait...", "Hold steady and look toward the camera.");
+            setHud("CAPTURING IN 3");
+            await wait(1000, signal);
 
-                        setTimeout(() => {
-                            document.body
-                                .querySelectorAll(".blackout")
-                                .forEach((effectDiv) => effectDiv.remove());
-                            createEffect("blink", 100, 1000);
-                            HackVideo.style.display = "none";
-                            setTimeout(() => {
-                                WebVideo.style.display = "block";
-                                window.recognitionPaused = false;
-                            }, 100);
-                            [line2, line3].forEach((line) => {
-                                line.style.visibility = "hidden";
-                                line.style.display = "none";
-                            });
-                        }, 14500);
-                        setTimeout(() => {
-                            performFinalTransition();
-                        }, 15000);
-                    }, 14500);
-                }, 4500);
-            }, 100);
-        }, 13500);
-    } catch (error) {
-        console.error("Camera permission denied:", error);
+            setHud("CAPTURING IN 2");
+            await wait(1000, signal);
+
+            setHud("CAPTURING IN 1");
+            await wait(1000, signal);
+
+            setHud("CAPTURED");
+            setStatus("Smile! Reference portrait captured.", "Preparing analysis...", "accent");
+            if (typeof window.captureSnapshot === "function") {
+                window.captureSnapshot({ scan: false });
+            }
+            triggerShutterFlash();
+            await wait(900, signal);
+            setHud("");
+
+            // Playful hacking prank sequence (non-blocking — Skip Intro remains interactive)
+            if (typeof window.setRecognitionPaused === "function") {
+                window.setRecognitionPaused(true);
+            }
+            setBlackout(true);
+            webVideo.style.display = "none";
+            if (!hackVideo.getAttribute("src")) {
+                hackVideo.src = "./images/hack-video.mp4";
+            }
+            hackVideo.currentTime = 0;
+            hackVideo.style.display = "block";
+            hackVideo.play().catch(() => {});
+
+            setStatus("System override initiated...", "Escalating local viewport privileges...", "terminal");
+            await wait(2000, signal);
+
+            setStatus("Firewall bypassed. Accessing local biometric node...", "Decrypting telemetry stream...", "terminal");
+            await wait(2200, signal);
+
+            setStatus(
+                "Just kidding — no hack here.",
+                "Restoring live camera feed and opening your readout...",
+                "accent"
+            );
+            await wait(2200, signal);
+
+            triggerShutterFlash();
+            finishToLiveMode({ triggerScan: true });
+        } catch (err) {
+            if (err && err.name === "AbortError") {
+                return;
+            }
+            console.error("Intro sequence aborted or camera unavailable:", err);
+        }
+    };
+
+    const skipIntro = () => {
+        if (activeAbort) activeAbort.abort();
+        finishToLiveMode({ triggerScan: true });
+    };
+
+    if (introToggleBtn) {
+        introToggleBtn.addEventListener("click", () => {
+            if (window.introCompleted) {
+                runIntroSequence();
+            } else {
+                skipIntro();
+            }
+        });
     }
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !window.introCompleted) {
+            skipIntro();
+        }
+    });
+
+    window.startIntroSequence = runIntroSequence;
+    runIntroSequence();
 });

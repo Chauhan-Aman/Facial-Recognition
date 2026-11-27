@@ -1,37 +1,33 @@
-/* Blink effect */
-@keyframes blink {
-    0% {
-        background-color: white;
-        opacity: 1;
-    }
-    50% {
-        background-color: black;
-        opacity: 1;
-    }
-    100% {
-        background-color: black;
-        opacity: 1;
-    }
+/* Shutter flash and stage blackout effects (leaves topbar controls clickable) */
+@keyframes shutter-flash {
+  0% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .blink {
-    animation: blink 2s linear;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 99;
+  position: fixed;
+  inset: 0;
+  background-color: #ffffff;
+  pointer-events: none;
+  z-index: 150;
+  animation: shutter-flash 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: opacity;
 }
 
-/* Blackout effect */
 .blackout {
-    background-color: black;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 99;
-    opacity: 1;
+  position: fixed;
+  inset: 0;
+  background-color: rgba(5, 6, 8, 0.92);
+  pointer-events: none;
+  z-index: 90;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.blackout.is-active {
+  opacity: 1;
 }

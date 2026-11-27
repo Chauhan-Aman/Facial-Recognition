@@ -5,67 +5,140 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description"
-        content="A cutting-edge facial recognition application that analyzes features such as age, gender, and emotions using advanced machine learning models.">
+        content="Real-time facial recognition application analyzing age, gender, and facial expressions locally in the browser.">
     <meta name="keywords"
         content="Facial Recognition, AI, Machine Learning, Age Detection, Gender Prediction, Emotion Analysis, Real-time Scanning">
     <meta name="author" content="Aman Chauhan">
-    <title>Facial recognition</title>
-    <link rel="stylesheet" href="./css/styles.css">
-    <link rel="stylesheet" href="./css/typing.css">
-    <link rel="stylesheet" href="./css/blink.css">
-    <link rel="stylesheet" href="./css/GridScan.css">
+    <title>Facial Recognition</title>
+    <link rel="stylesheet" href="./css/styles.css?v=4">
+    <link rel="stylesheet" href="./css/typing.css?v=4">
+    <link rel="stylesheet" href="./css/blink.css?v=4">
+    <link rel="stylesheet" href="./css/GridScan.css?v=4">
 </head>
 
-
 <body>
-    <canvas id="canvas"></canvas>
-    <canvas id="canvasimg"></canvas>
-    
-    <h1 style="text-align: center; margin-top: 2rem; margin-bottom: 1rem;" class="z-index-999">FACIAL RECOGNITION</h1>
-    <div id="controls-bar">
-        <label for="detector-mode">
-            Detector:
-            <select id="detector-mode" aria-label="Face detector mode">
-                <option value="tiny" selected>Fast (TinyFace ~1 MB)</option>
-                <option value="ssd">Accurate (SSD MobileNet ~6.7 MB)</option>
-            </select>
-        </label>
-        <label class="toggle-label" for="toggle-landmarks">
-            <input type="checkbox" id="toggle-landmarks" checked>
-            Landmarks
-        </label>
-        <span id="perf-stats" aria-live="polite">Loading models...</span>
-    </div>
-    <div id="no-permission-message">
-        No camera permission given. Please enable camera access to CONTINUE.
-    </div>
-
-    <div id="container">
-        <video id="video-feed" height="480" width="720" autoplay muted playsinline></video>
-        <video id="hack-video" height="480" width="720" autoplay loop muted playsinline></video>
-        <div id="anaylzeResults">
-            <div id="screenshot-container">
-                <img id="screenshot" height="210" width="340" src="" alt="Captured Image">
-                <div class="scanning-overlay"></div>
-                <div class="scanning-bar"></div>
-            </div>
-            <span id="predictive-results" style="display: none;"></span>
+    <header class="topbar z-index-top">
+        <div class="brand">
+            <span id="camera-dot" class="status-dot is-loading" aria-hidden="true"></span>
+            <h1 class="brand-title">FACIAL RECOGNITION</h1>
+            <span id="status-badge" class="status-badge">Initializing</span>
         </div>
-    </div>
 
-    <div class="typewriter" style="margin-top: 2rem;">
-        <h1 class="line1 boxdims">Hey there! Ready for some facial recognition magic?</h1>
-        <h1 class="line2 boxdims">Hmm... Let me get a good look at you!</h1>
-        <h1 class="line3 boxdims">Capturing your beautiful face... Hold tight, say "Cheese!"</h1>
-    </div>
+        <div id="controls-bar" class="controls-bar">
+            <label class="control-item" for="detector-mode">
+                <span class="control-label">Detector</span>
+                <select id="detector-mode" aria-label="Face detector mode">
+                    <option value="tiny" selected>Fast · TinyFace (~1 MB)</option>
+                    <option value="ssd">Accurate · SSD (~6.7 MB)</option>
+                </select>
+            </label>
 
+            <label class="control-item control-toggle" for="toggle-landmarks">
+                <input type="checkbox" id="toggle-landmarks" checked>
+                <span>Landmarks</span>
+            </label>
+
+            <button id="intro-toggle-btn" class="btn btn-ghost" type="button">Skip Intro</button>
+
+            <span id="perf-stats" class="perf-stats" aria-live="polite">Loading models...</span>
+        </div>
+    </header>
+
+    <main class="app-main">
+        <div id="no-permission-message" class="permission-panel" role="alert">
+            <p class="permission-title">Camera access required</p>
+            <p class="permission-desc">Enable camera permissions in your browser to run real-time facial analysis locally.</p>
+            <button id="retry-camera-btn" class="btn btn-primary" type="button">Retry Camera</button>
+        </div>
+
+        <section id="container" class="workspace" aria-label="Recognition workspace">
+            <div class="stage-column">
+                <div id="feed-stage" class="feed-stage">
+                    <video id="video-feed" autoplay muted playsinline></video>
+                    <video id="hack-video" loop muted playsinline></video>
+                    <canvas id="canvas"></canvas>
+                    <div id="countdown-hud" class="countdown-hud" hidden aria-hidden="true"></div>
+                    <div id="camera-placeholder" class="camera-placeholder">
+                        <span>Requesting camera stream...</span>
+                    </div>
+                    <span class="reticle reticle-tl" aria-hidden="true"></span>
+                    <span class="reticle reticle-tr" aria-hidden="true"></span>
+                    <span class="reticle reticle-bl" aria-hidden="true"></span>
+                    <span class="reticle reticle-br" aria-hidden="true"></span>
+                </div>
+
+                <div class="status-strip" aria-live="polite">
+                    <p id="status-primary" class="status-primary is-visible">Camera initializing — preparing optical tracker.</p>
+                    <p id="status-secondary" class="status-secondary">Hold steady or click Skip Intro for instant live metrics.</p>
+                </div>
+            </div>
+
+            <aside id="analyze-results" class="inspector" aria-label="Subject analysis results">
+                <div class="inspector-header">
+                    <span class="inspector-title">SUBJECT READOUT</span>
+                    <div class="inspector-actions">
+                        <div class="source-switch" role="group" aria-label="Readout source">
+                            <button id="source-live-btn" class="source-btn is-active" type="button">Live</button>
+                            <button id="source-snap-btn" class="source-btn" type="button" disabled>Snapshot</button>
+                        </div>
+                        <button id="retake-btn" class="btn btn-primary btn-sm" type="button">Capture</button>
+                    </div>
+                </div>
+
+                <div id="screenshot-container" class="screenshot-frame">
+                    <img id="screenshot" alt="Captured subject frame">
+                    <div id="screenshot-empty" class="screenshot-empty">No snapshot captured yet</div>
+                    <span id="capture-meta" class="capture-badge" hidden></span>
+                    <div class="scanning-overlay"></div>
+                    <div class="scanning-bar"></div>
+                </div>
+
+                <div id="readout-panel" class="readout-panel">
+                    <div id="face-tabs" class="face-tabs" hidden></div>
+
+                    <div id="readout-empty" class="readout-empty">
+                        Position a face in the frame to stream live age, gender, and expression estimates.
+                    </div>
+
+                    <div id="readout-metrics" class="readout-metrics" hidden>
+                        <div class="metric-grid">
+                            <div class="metric-cell">
+                                <span class="metric-label">EST. AGE</span>
+                                <span id="metric-age" class="metric-value">--</span>
+                            </div>
+                            <div class="metric-cell">
+                                <span class="metric-label">GENDER</span>
+                                <span id="metric-gender" class="metric-value">--</span>
+                                <span id="metric-gender-conf" class="metric-sub">--</span>
+                            </div>
+                            <div class="metric-cell">
+                                <span class="metric-label">FACES</span>
+                                <span id="metric-faces" class="metric-value">0</span>
+                            </div>
+                        </div>
+
+                        <div class="expressions-section">
+                            <div class="section-heading">
+                                <span>EXPRESSION SIGNALS</span>
+                                <span id="top-emotion-label" class="top-emotion">--</span>
+                            </div>
+                            <div id="expressions-list" class="expressions-list"></div>
+                        </div>
+                    </div>
+
+                    <p class="readout-footnote">Approximate biometric estimates smoothed across frames.</p>
+                </div>
+
+                <span id="predictive-results" class="sr-only" aria-hidden="true"></span>
+            </aside>
+        </section>
+    </main>
+
+    <canvas id="canvasimg" hidden></canvas>
 
     <script src="./scripts/face-api.min.js"></script>
-    <!-- <script src="./scripts/PredictionsScript.js"></script> -->
-    <script src="./scripts/Script.js"></script>
-    <!-- <script src="./scripts/newtyping.js"></script> -->
-    <script src="./scripts/transitions.js"></script>
-    <!-- <script src="./scripts/typingtrials.js"></script> -->
+    <script src="./scripts/Script.js?v=4"></script>
+    <script src="./scripts/transitions.js?v=4"></script>
 </body>
 
 </html>
